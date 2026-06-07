@@ -6,43 +6,68 @@
 <title>Society 406 — Maintenance Manager</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<!-- Firebase for cloud sync -->
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
 
 <!-- ══════════════════════════════════════════════════════
-     FIREBASE — Real-time shared data for all members
-     Replace the 6 YOUR_... values below with your own
-     Firebase project config (Project Settings → Your apps)
-════════════════════════════════════════════════════════ -->
-<script type="module">
-import { initializeApp }         from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getDatabase, ref, set, get, onValue }
-                                  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+     FIREBASE CONFIG — fill in ALL 7 values below
+     ✏️  Go to: Firebase Console → Your Project →
+         Project Settings → Your apps → Web app →
+         Copy the firebaseConfig object values here.
 
-// ─── PASTE YOUR FIREBASE CONFIG HERE ───────────────────
-const firebaseConfig = {
+     ALSO: Go to Firebase Console → Firestore Database
+     → Rules tab → Replace rules with:
+     rules_version = '2';
+     service cloud.firestore {
+       match /databases/{database}/documents {
+         match /{document=**} {
+           allow read, write: if true;
+         }
+       }
+     }
+     → Click Publish. (This allows all reads/writes.)
+════════════════════════════════════════════════════════ -->
+<script>
+window.HARDCODED_FB_CFG = {
   apiKey: "AIzaSyCE1BtA3_DqghMxtNCQ6yK8UCKtAE1xXb4",
   authDomain: "society406.firebaseapp.com",
-  databaseURL: "https://society406-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "society406",
   storageBucket: "society406.firebasestorage.app",
   messagingSenderId: "661341922918",
   appId: "1:661341922918:web:c7e603a5dd329123f42fa7",
   measurementId: "G-VTT0FMQBJJ"
 };
-// ───────────────────────────────────────────────────────
+window.FB_AUTO_CONNECT = true;
 
-const _app = initializeApp(firebaseConfig);
-const _db  = getDatabase(_app);
-const FB   = 'society406/';   // root path in your Firebase DB
-
-// Expose 3 helpers to the global scope (used by saveSt / loadSt below)
-window._fbSet    = (path, data) => set(ref(_db, path), data);
-window._fbGet    = (path)       => get(ref(_db, path)).then(s => s.exists() ? s.val() : null);
-window._fbListen = (path, cb)   => onValue(ref(_db, path), s => cb(s.exists() ? s.val() : null));
-window._FB       = FB;
-window._fbReady  = true;
-
-document.dispatchEvent(new Event('firebase-ready'));
+// Auto-connect runs after all scripts have loaded (DOMContentLoaded
+// guarantees the compat SDK scripts above are executed).
+document.addEventListener('DOMContentLoaded', function() {
+  var hc = window.HARDCODED_FB_CFG;
+  var ok = window.FB_AUTO_CONNECT
+        && hc && hc.apiKey
+        && hc.apiKey !== 'YOUR_API_KEY'
+        && hc.projectId !== 'YOUR_PROJECT_ID';
+  if (!ok) {
+    console.info('Society 406: Firebase config not filled in — local-only mode.');
+    return;
+  }
+  // Small delay so the rest of the app scripts fully initialise first
+  setTimeout(function() {
+    if (typeof initCloud === 'function') {
+      saveFbCfgLocal(hc);
+      var connected = initCloud(hc);
+      if (connected) {
+        console.info('Society 406: Firebase Firestore connected ✅');
+      } else {
+        console.warn('Society 406: Firebase connection failed — check config and Firestore rules.');
+      }
+    }
+  }, 500);
+});
 </script>
+<!-- ExcelJS for coloured multi-sheet reports -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
 <style>
 :root{
   --ink:#1a1a2e;--ink-lt:#4a4a6a;--ink-mu:#8888aa;
@@ -332,9 +357,26 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 .save-indicator{position:fixed;top:74px;right:16px;background:var(--green);color:#fff;
   font-size:12px;font-weight:600;padding:6px 14px;border-radius:20px;
   box-shadow:var(--sh-md);z-index:300;animation:tIn .3s ease;display:flex;align-items:center;gap:6px}
-.mpk-badge{font-size:11px;padding:2px 9px;border-radius:20px;font-weight:600;
-  background:var(--amber-lt);color:var(--amber);border:1px solid rgba(176,96,0,.2)}
-.mpk-badge.is-live{background:var(--green-lt);color:var(--green);border-color:rgba(45,122,79,.2)}
+
+/* ── Sync badge ── */
+.sync-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;
+  padding:3px 10px;border-radius:20px;letter-spacing:.04em}
+.sync-on{background:var(--green-lt);color:var(--green)}
+.sync-saving{background:var(--amber-lt);color:var(--amber)}
+.sync-error{background:var(--danger-lt);color:var(--danger)}
+.sync-off{background:var(--cream-dk);color:var(--ink-mu)}
+/* ── Vehicle card ── */
+.veh-info{margin-top:9px;padding:8px 10px;background:var(--cream-dk);border-radius:8px;
+  font-size:12px;color:var(--ink-lt);line-height:1.7}
+.veh-info .vrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.veh-chip{background:#fff;border:1px solid var(--border);border-radius:6px;
+  padding:2px 8px;font-size:11px;font-weight:600;color:var(--ink)}
+/* ── Vehicle edit modal ── */
+#vehicle-modal .modal-box{max-width:480px}
+.veh-row-edit{display:grid;grid-template-columns:110px 1fr 32px;gap:8px;align-items:center;margin-bottom:8px}
+.veh-row-edit select{padding:7px 8px;border:1px solid var(--border);border-radius:8px;
+  background:#fff;font-size:13px;color:var(--ink)}
+
 </style>
 </head>
 <body>
@@ -389,7 +431,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="u-av" id="u-av">🏠</div>
       <div><div class="u-nm" id="u-nm">Member</div><div class="r-pill r-mem" id="u-role">MEMBER</div></div>
     </div>
-    <span id="fb-badge" style="font-size:11px;padding:3px 9px;border-radius:20px;font-weight:600;background:rgba(255,255,255,.12);color:rgba(255,255,255,.5);border:1px solid rgba(255,255,255,.15)">⏳ Connecting…</span>
     <button class="btn-lo" onclick="doLogout()">← Logout</button>
   </div>
 </div>
@@ -404,7 +445,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 
 <!-- ── OVERVIEW ── -->
 <div class="page active" id="page-overview">
-  <!-- Overview: no month filter — always shows current month -->
+  <!-- Overview: no month filter - always shows current month -->
   <div id="ov-alert"></div>
   <div class="sg">
     <div class="sc g"><span class="sc-em">💵</span><div class="sc-lb">Total Collected</div><div class="sc-vl g" id="s-col">₹0</div><div class="sc-sb" id="s-col-sub">Since cycle start</div></div>
@@ -586,7 +627,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 
     <div class="ss">
       <div class="ss-title">📅 Contribution Start Month &amp; Year</div>
-      <div class="ss-desc">From this month onwards ₹500 auto-applies. <strong>Oct 2025 → month before this = zero by default</strong> (admin enters manually). Navigation always starts Oct 2025.</div>
+      <div class="ss-desc">From this month onwards ₹500 auto-applies. Oct 2025 to the month before this = zero by default (admin enters manually). Navigation always starts Oct 2025.</div>
       <div class="fr">
         <div class="fg"><label class="fl">Start Month</label>
           <div class="sw"><select class="fs" id="cfg-start-month">
@@ -630,6 +671,49 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
           <div class="iu"><input type="number" class="fi" id="cfg-cdays" min="1" max="30"><span>days</span></div>
           <div style="font-size:11px;color:var(--ink-mu);margin-top:4px">Extra ₹ added every N days</div></div>
       </div>
+    </div>
+
+    <div class="ss">
+      <div class="ss-title">☁️ Cloud Sync — Live Data Across All Devices</div>
+      <div class="ss-desc">
+        Connect to <strong>Firebase</strong> so every change (contributions, expenses, settings) instantly appears on all members' and admin's devices.
+        Firebase config is hardcoded in the app. Connection happens automatically on page load. Status shown in the top bar.
+      </div>
+      <div style="background:var(--cream-dk);border-radius:var(--rsm);padding:12px 14px;margin-bottom:14px;font-size:12px;color:var(--ink-lt);line-height:1.8">
+        <strong>Quick Setup (5 mins):</strong><br>
+        1. Go to <strong>console.firebase.google.com</strong> → Create project (free)<br>
+        2. Click <strong>⚙ Project Settings</strong> → Add Web App → Copy the config below<br>
+        3. Go to <strong>Firestore Database</strong> → Create database → Start in <em>test mode</em><br>
+        4. Paste config here and click <strong>Connect</strong>
+      </div>
+      <div class="fr">
+        <div class="fg"><label class="fl">API Key</label><input type="text" class="fi" id="fb-apiKey" placeholder="AIzaSy..."></div>
+        <div class="fg"><label class="fl">Project ID</label><input type="text" class="fi" id="fb-projectId" placeholder="my-project-12345"></div>
+      </div>
+      <div class="fr">
+        <div class="fg"><label class="fl">Auth Domain</label><input type="text" class="fi" id="fb-authDomain" placeholder="project.firebaseapp.com"></div>
+        <div class="fg"><label class="fl">Storage Bucket</label><input type="text" class="fi" id="fb-storageBucket" placeholder="project.appspot.com"></div>
+      </div>
+      <div class="fr">
+        <div class="fg"><label class="fl">Messaging Sender ID</label><input type="text" class="fi" id="fb-messagingSenderId" placeholder="123456789"></div>
+        <div class="fg"><label class="fl">App ID</label><input type="text" class="fi" id="fb-appId" placeholder="1:123:web:abc"></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:10px">
+        <button class="btn btn-pri" id="cloud-connect-btn" onclick="connectCloud()" style="flex:1">☁️ Connect to Cloud</button>
+        <button class="btn btn-d" onclick="disconnectCloud()" style="width:130px">Disconnect</button>
+      </div>
+    </div>
+
+    <div class="ss">
+      <div class="ss-title">🏠 Flat Names &amp; Labels</div>
+      <div class="ss-desc">Edit flat names, floor labels, and block names. Changes apply instantly everywhere in the app — login menu, contributions, reports, member view.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:6px;margin-bottom:6px;padding:0 2px">
+        <div style="font-size:11px;font-weight:600;color:var(--ink-mu);text-transform:uppercase;letter-spacing:.05em">Flat Name</div>
+        <div style="font-size:11px;font-weight:600;color:var(--ink-mu);text-transform:uppercase;letter-spacing:.05em">Floor</div>
+        <div style="font-size:11px;font-weight:600;color:var(--ink-mu);text-transform:uppercase;letter-spacing:.05em">Block</div>
+        <div></div>
+      </div>
+      <div id="flat-names-container"></div>
     </div>
 
     <div class="ss">
@@ -737,1324 +821,1085 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
 </div>
 </div>
 
-
 <script>
-// ═══════════════════════════════════════════════════════════════
-//  CONSTANTS
-// ═══════════════════════════════════════════════════════════════
-const FLATS = [
+// ============================================================
+//  SOCIETY 406 MANAGER v4 — Cloud + Vehicle Details + Excel
+// ============================================================
+var FLAT_DEFS=[
   {id:'406A-GF',name:'Flat 406A',floor:'Ground Floor',block:'Block A',emoji:'🏠',color:'#2d7a4f',bg:'#e0f5ea'},
   {id:'406A-FF',name:'Flat 406A',floor:'First Floor', block:'Block A',emoji:'🏠',color:'#0d7377',bg:'#e0f4f4'},
   {id:'406A-SF',name:'Flat 406A',floor:'Second Floor',block:'Block A',emoji:'🏠',color:'#5a2d82',bg:'#f0e8fa'},
   {id:'406B-GF',name:'Flat 406B',floor:'Ground Floor',block:'Block B',emoji:'🏠',color:'#c9a84c',bg:'#fff8e8'},
   {id:'406B-FF',name:'Flat 406B',floor:'First Floor', block:'Block B',emoji:'🏠',color:'#b06000',bg:'#fff3dc'},
   {id:'406B-SF',name:'Flat 406B',floor:'Second Floor',block:'Block B',emoji:'🏠',color:'#c84b6a',bg:'#fde8ee'},
-  {id:'AHUJA',  name:'Ahuja Roof',floor:'Roof Top',   block:'Ahuja Wing',emoji:'🏠',color:'#1a1a2e',bg:'#e8e8f4'},
+  {id:'AHUJA',  name:'Ahuja Roof',floor:'Roof Top',   block:'Ahuja Wing',emoji:'🏠',color:'#1a1a2e',bg:'#e8e8f4'}
 ];
-const CAT_ICO = {'💡 Utilities':'💡','🔒 Security':'🔒','🔧 Maintenance':'🔧','🧹 Cleaning':'🧹','🏗 Repairs':'🏗','🌿 Gardening':'🌿','📦 Other':'📦'};
-const CAT_BG  = {'💡 Utilities':'#fff3dc','🔒 Security':'#fde8ee','🔧 Maintenance':'#e0f4f4','🧹 Cleaning':'#e0f5ea','🏗 Repairs':'#fde8e8','🌿 Gardening':'#e8f8e8','📦 Other':'#f0e8fa'};
-const MONTHS  = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const SMON    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+var FLATS=FLAT_DEFS.map(function(f){return Object.assign({},f);});
 
-// Fresh storage keys — avoids stale/corrupt v2 data
-const SK = { cfg:'soc406_cfg3', data:'soc406_data3', pin:'soc406_pin3' };
+var VEH_TYPES=['2-Wheeler (Bike/Scooter)','4-Wheeler (Car/SUV)','3-Wheeler (Auto)','Heavy Vehicle','Other'];
 
-// ── FIXED: navigation always starts Oct 2025 (never configurable — prevents login loop) ──
-const NAV_START = '2025-10';
+function applyFlatNames(){
+  if(!cfg.flatNames)return;
+  FLATS.forEach(function(f){
+    var s=cfg.flatNames[f.id];if(!s)return;
+    if(s.name)f.name=s.name;if(s.floor)f.floor=s.floor;if(s.block)f.block=s.block;
+  });
+}
 
-// Default config
-const DEFAULT_CFG = {
-  baseAmount:500,
-  startDay:1, warnDay:7, penaltyDay:10, updateDay:1,
-  penaltyAmt:100, compoundDays:1,      // ₹100 per day (daily penalty)
-  upiId:'', acName:'', socName:'Society 406', qrData:null,
-  // When ₹500 auto-contribution starts (configurable, defaults June 2026):
-  cycleStartMonth:6, cycleStartYear:2026,
-  // When penalty starts (same as contribution start by default):
-  penaltyStartMonth:6, penaltyStartYear:2026,
+var CAT_ICO={'💡 Utilities':'💡','🔒 Security':'🔒','🔧 Maintenance':'🔧','🧹 Cleaning':'🧹','🏗 Repairs':'🏗','🌿 Gardening':'🌿','📦 Other':'📦'};
+var CAT_BG ={'💡 Utilities':'#fff3dc','🔒 Security':'#fde8ee','🔧 Maintenance':'#e0f4f4','🧹 Cleaning':'#e0f5ea','🏗 Repairs':'#fde8e8','🌿 Gardening':'#e8f8e8','📦 Other':'#f0e8fa'};
+var MONTHS =['January','February','March','April','May','June','July','August','September','October','November','December'];
+var SMON   =['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+var SK={cfg:'soc406_cfg4',data:'soc406_data4',pin:'soc406_pin4'};
+var FB_KEY ='soc406_firebase';
+var NAV_START='2025-10';
+
+var DEFAULT_CFG={
+  baseAmount:500,startDay:1,warnDay:7,penaltyDay:10,updateDay:1,
+  penaltyAmt:100,compoundDays:1,
+  upiId:'',acName:'',socName:'Society 406',qrData:null,
+  cycleStartMonth:6,cycleStartYear:2026,
+  penaltyStartMonth:6,penaltyStartYear:2026,
+  flatNames:{},
+  flatDetails:{}   // {fid:{ownerName,contact,vehicles:[{type,number}]}}
 };
 
-// ── Runtime ──
-let cfg = {...DEFAULT_CFG};
-let adminPin = '1234';
-let currentUser = null, isAdmin = false;
-const TODAY    = new Date();
-const TODAY_YM = fmtYM(TODAY);
+var cfg=Object.assign({},DEFAULT_CFG);
+var adminPin='1234';
+var currentUser=null,isAdmin=false;
+var TODAY=new Date();
+var TODAY_YM=fmtYM(TODAY);
+var viewMonth=TODAY_YM;
+var allData={};
 
-// Shared view month for Contributions + Expenses pages
-// Overview ALWAYS uses TODAY_YM (no filter)
-let viewMonth = TODAY_YM;
-let allData   = {};   // { "YYYY-MM": { contributions:{fid:{baseDue,paid,penalty,arrears,payments:[]}}, expenses:[] } }
+// Cloud state
+var db=null,cloudEnabled=false,cloudUnsub=null,cloudSaving=false,ignoreNextSnap=false;
 
-// ═══════════════════════════════════════════════════════════════
-//  PURE HELPERS
-// ═══════════════════════════════════════════════════════════════
-function fmtYM(d)   { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
-function ymToDate(s){ const[y,m]=s.split('-'); return new Date(+y,+m-1,1); }
-function monthLabel(s){ const d=ymToDate(s); return MONTHS[d.getMonth()]+' '+d.getFullYear(); }
-function ord(n){ const v=n%100; return n+(['th','st','nd','rd'][(v-20)%10]||['th','st','nd','rd'][v]||'th'); }
-function dom(){ return TODAY.getDate(); }
-function addM(ym,n){ const d=ymToDate(ym); d.setMonth(d.getMonth()+n); return fmtYM(d); }
-function prevYM(ym){ return addM(ym,-1); }
-function nextYM(ym){ return addM(ym,+1); }
+// ── HELPERS ──
+function fmtYM(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');}
+function ymToDate(s){var p=s.split('-');return new Date(+p[0],+p[1]-1,1);}
+function monthLabel(s){var d=ymToDate(s);return MONTHS[d.getMonth()]+' '+d.getFullYear();}
+function ord(n){var v=n%100;return n+(['th','st','nd','rd'][(v-20)%10]||['th','st','nd','rd'][v]||'th');}
+function dom(){return TODAY.getDate();}
+function addM(ym,n){var d=ymToDate(ym);d.setMonth(d.getMonth()+n);return fmtYM(d);}
+function prevYM(ym){return addM(ym,-1);}
+function nextYM(ym){return addM(ym,+1);}
+function contribStartYM(){return cfg.cycleStartYear+'-'+String(cfg.cycleStartMonth).padStart(2,'0');}
+function penaltyStartYM(){return cfg.penaltyStartYear+'-'+String(cfg.penaltyStartMonth).padStart(2,'0');}
+function isManualMonth(ym){return ym<contribStartYM();}
+function autoBaseDue(ym){return isManualMonth(ym)?0:cfg.baseAmount;}
+function penaltyActive(ym){return ym>=penaltyStartYM();}
+function displayMonth(){return viewMonth>TODAY_YM?TODAY_YM:viewMonth;}
 
-// ── Contribution / penalty window ──
-function contribStartYM(){ return cfg.cycleStartYear+'-'+String(cfg.cycleStartMonth).padStart(2,'0'); }
-function penaltyStartYM(){ return cfg.penaltyStartYear+'-'+String(cfg.penaltyStartMonth).padStart(2,'0'); }
-function isManualMonth(ym){ return ym < contribStartYM(); }
-function autoBaseDue(ym)  { return isManualMonth(ym) ? 0 : cfg.baseAmount; }
-function penaltyActive(ym){ return ym >= penaltyStartYM(); }
-
-// Auto-penalty for CURRENT LIVE month only
-function livePenalty(ym){
-  if(!penaltyActive(ym)) return 0;
-  if(ym !== TODAY_YM) return 0;
-  const d = dom();
-  if(d <= cfg.penaltyDay) return 0;
-  return cfg.penaltyAmt * Math.ceil((d - cfg.penaltyDay) / cfg.compoundDays);
-}
-
-// If admin selects a future month, return current month's data instead.
-// Contributions/expenses for a future month don't exist until that month's 1st.
-function displayMonth(){ return viewMonth > TODAY_YM ? TODAY_YM : viewMonth; }
-
-// Correct penalty for any month:
-//  - future months  → 0 (month hasn't started)
-//  - current month  → daily penalty from today's date
-//  - past months    → stored penalty; if 0 and penalty was enabled, compute full-month max
-function getEffectivePenalty(fid, ym){
-  if(!penaltyActive(ym)) return 0;   // penalty not enabled for this period
-  if(ym > TODAY_YM) return 0;        // future month: no penalty
-  const c = allData[ym] && allData[ym].contributions[fid];
-  const stored = c ? (c.penalty || 0) : 0;
-  if(ym === TODAY_YM){
-    const d = dom();
-    if(d <= cfg.penaltyDay) return stored;
-    // KEY FIX: if member has already paid enough to cover baseDue+arrears+stored_penalty
-    // then their balance is zero — do NOT grow penalty any further.
-    const rawDue = (c ? (c.baseDue||0) : 0) + stored + (c ? (c.arrears||0) : 0);
-    if(c && rawDue > 0 && c.paid >= rawDue) return stored;  // frozen — paid in full
-    const live = cfg.penaltyAmt * Math.ceil((d - cfg.penaltyDay) / cfg.compoundDays);
-    return Math.max(stored, live);
+// ── PENALTY ──
+function getEffectivePenalty(fid,ym){
+  if(!penaltyActive(ym))return 0;if(ym>TODAY_YM)return 0;
+  var c=allData[ym]&&allData[ym].contributions[fid];
+  var stored=c?(c.penalty||0):0;
+  if(ym===TODAY_YM){
+    var d=dom();if(d<=cfg.penaltyDay)return stored;
+    var rawDue=(c?(c.baseDue||0):0)+stored+(c?(c.arrears||0):0);
+    if(c&&rawDue>0&&c.paid>=rawDue)return stored;
+    var live=cfg.penaltyAmt*Math.ceil((d-cfg.penaltyDay)/cfg.compoundDays);
+    return Math.max(stored,live);
   }
-  // Past auto-contribution month: if admin stored a penalty use it;
-  // otherwise compute the full-month penalty (so past overdue shows correctly)
-  if(stored > 0) return stored;
-  if(isManualMonth(ym)) return 0;   // pre-contribution months: only stored values
-  // Auto month (June 2026+): compute max penalty that would have applied by month end
-  const mDate = ymToDate(ym);
-  const lastDay = new Date(mDate.getFullYear(), mDate.getMonth() + 1, 0).getDate();
-  if(lastDay <= cfg.penaltyDay) return 0;
-  return cfg.penaltyAmt * Math.ceil((lastDay - cfg.penaltyDay) / cfg.compoundDays);
+  if(stored>0)return stored;if(isManualMonth(ym))return 0;
+  var mDate=ymToDate(ym);
+  var lastDay=new Date(mDate.getFullYear(),mDate.getMonth()+1,0).getDate();
+  if(lastDay<=cfg.penaltyDay)return 0;
+  return cfg.penaltyAmt*Math.ceil((lastDay-cfg.penaltyDay)/cfg.compoundDays);
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  DATA MANAGEMENT
-// ═══════════════════════════════════════════════════════════════
-// Balance without triggering ensureMonth (avoids infinite recursion)
-function rawBal(fid, ym){
-  if(!allData[ym]) return 0;
-  const c = allData[ym].contributions[fid];
-  if(!c) return 0;
-  return Math.max(0, c.baseDue + getEffectivePenalty(fid,ym) + c.arrears - c.paid);
+// ── DATA ──
+function rawBal(fid,ym){
+  if(!allData[ym])return 0;var c=allData[ym].contributions[fid];if(!c)return 0;
+  return Math.max(0,c.baseDue+getEffectivePenalty(fid,ym)+c.arrears-c.paid);
 }
-
 function ensureMonth(ym){
-  if(!allData[ym]) allData[ym] = { contributions:{}, expenses:[] };
-  if(!allData[ym].expenses) allData[ym].expenses = [];
-  const prev = prevYM(ym);
-  FLATS.forEach(f=>{
+  if(!allData[ym])allData[ym]={contributions:{},expenses:[]};
+  if(!allData[ym].expenses)allData[ym].expenses=[];
+  var prev=prevYM(ym);
+  FLATS.forEach(function(f){
     if(!allData[ym].contributions[f.id]){
-      // Manual months (pre-contribStart): always start at zero, no carry
-      // Auto months (June 2026+): carry unpaid balance from previous month
-      const arrears = isManualMonth(ym) ? 0 : rawBal(f.id, prev);
-      allData[ym].contributions[f.id] = {
-        baseDue: autoBaseDue(ym), paid:0, penalty:0, arrears, payments:[]
-      };
+      var ar=isManualMonth(ym)?0:rawBal(f.id,prev);
+      allData[ym].contributions[f.id]={baseDue:autoBaseDue(ym),paid:0,penalty:0,arrears:ar,payments:[]};
     }
-    if(!allData[ym].contributions[f.id].payments) allData[ym].contributions[f.id].payments = [];
+    if(!allData[ym].contributions[f.id].payments)allData[ym].contributions[f.id].payments=[];
   });
 }
-
-function getMD(ym){ ensureMonth(ym); return allData[ym]; }
-
-// Per-month values
-function flatDue(fid,ym){ const c=getMD(ym).contributions[fid]; return c.baseDue+getEffectivePenalty(fid,ym)+c.arrears; }
-function flatBal(fid,ym){ return Math.max(0,flatDue(fid,ym)-getMD(ym).contributions[fid].paid); }
-
-// ── Cumulative values from NAV_START through toYM ──
-function cumBaseDue(fid, toYM){
-  let t=0, cur=NAV_START;
-  while(cur<=toYM){ if(allData[cur]?.contributions[fid]) t+=allData[cur].contributions[fid].baseDue||0; cur=nextYM(cur); }
-  return t;
+function getMD(ym){ensureMonth(ym);return allData[ym];}
+function flatDue(fid,ym){var c=getMD(ym).contributions[fid];return c.baseDue+getEffectivePenalty(fid,ym)+c.arrears;}
+function flatBal(fid,ym){return Math.max(0,flatDue(fid,ym)-getMD(ym).contributions[fid].paid);}
+function cumBaseDue(fid,toYM){var t=0,cur=NAV_START;while(cur<=toYM){if(allData[cur]&&allData[cur].contributions[fid])t+=allData[cur].contributions[fid].baseDue||0;cur=nextYM(cur);}return t;}
+function cumPenalty(fid,toYM){var t=0,cur=NAV_START;while(cur<=toYM){if(allData[cur]&&allData[cur].contributions[fid])t+=getEffectivePenalty(fid,cur);cur=nextYM(cur);}return t;}
+function cumPaid(fid,toYM){var t=0,cur=NAV_START;while(cur<=toYM){if(allData[cur]&&allData[cur].contributions[fid])t+=allData[cur].contributions[fid].paid||0;cur=nextYM(cur);}return t;}
+function cumDue(fid,toYM){return cumBaseDue(fid,toYM)+cumPenalty(fid,toYM);}
+function cumBal(fid,toYM){return Math.max(0,cumDue(fid,toYM)-cumPaid(fid,toYM));}
+function totCollected(toYM){var t=0,cur=NAV_START;while(cur<=toYM){if(allData[cur])FLATS.forEach(function(f){t+=allData[cur].contributions[f.id]?allData[cur].contributions[f.id].paid||0:0;});cur=nextYM(cur);}return t;}
+function totSpent(toYM){var t=0;Object.values(allData).forEach(function(md){(md.expenses||[]).forEach(function(e){if(e.date&&e.date.substring(0,7)<=toYM)t+=e.amount;});});return t;}
+function expsForMonth(ym){var seen=new Set(),res=[];Object.values(allData).forEach(function(md){(md.expenses||[]).forEach(function(e){if(e.date&&e.date.substring(0,7)===ym&&!seen.has(e.id)){seen.add(e.id);res.push(e);}});});return res.sort(function(a,b){return new Date(b.date)-new Date(a.date);});}
+function totPending(toYM){return FLATS.reduce(function(s,f){return s+cumBal(f.id,toYM);},0);}
+function paidCnt(toYM){return FLATS.filter(function(f){return cumBal(f.id,toYM)===0;}).length;}
+function getStatus(fid,ym){
+  var c=getMD(ym).contributions[fid];if(c.statusOverride)return c.statusOverride;
+  if(flatBal(fid,ym)===0)return 'paid';
+  var live=ym===TODAY_YM,d=live?dom():0;
+  if(penaltyActive(ym)&&d>cfg.penaltyDay)return 'danger';
+  if(d>cfg.warnDay)return 'warn';return 'ok';
 }
-function cumPenalty(fid, toYM){
-  let t=0, cur=NAV_START;
-  while(cur<=toYM){
-    if(allData[cur]?.contributions[fid]) t+=getEffectivePenalty(fid,cur);
-    cur=nextYM(cur);
+function syncPayments(fid,ym,newPaid){
+  var c=getMD(ym).contributions[fid];if(newPaid<=0){c.payments=[];return;}
+  var ps=(c.payments||[]).reduce(function(s,p){return s+(p.amt||0);},0);
+  if(Math.abs(ps-newPaid)<0.01)return;
+  c.payments=[{amt:newPaid,date:TODAY.toISOString().split('T')[0],note:'Admin adjusted'}];
+}
+
+// ── VEHICLE / CONTACT HELPERS ──
+function getDetails(fid){
+  if(!cfg.flatDetails)cfg.flatDetails={};
+  return cfg.flatDetails[fid]||{ownerName:'',contact:'',vehicles:[]};
+}
+function vehIcon(type){
+  var m={'2-Wheeler (Bike/Scooter)':'&#127949;','4-Wheeler (Car/SUV)':'&#128663;','3-Wheeler (Auto)':'&#128506;','Heavy Vehicle':'&#128667;','Other':'&#128665;'};
+  return m[type]||'🚙';
+}
+function renderVehicleInfo(fid){
+  var det=getDetails(fid);
+  var hasData=det.ownerName||det.contact||(det.vehicles&&det.vehicles.length>0);
+  if(!hasData){
+    var isOwn=!isAdmin&&fid===currentUser;
+    return isOwn
+      ? '<div class="veh-info" style="color:var(--teal);border:1px dashed var(--teal);background:var(--teal-lt)">'
+        +'&#128221; Tap <strong>My Details</strong> button above to add your contact &amp; vehicle info</div>'
+      : '';
   }
-  return t;
+  var parts=[];
+  if(det.ownerName)parts.push('&#128100; '+det.ownerName);
+  if(det.contact)parts.push('&#128222; '+det.contact);
+  var vChips=(det.vehicles||[]).map(function(v){
+    return '<span class="veh-chip">'+vehIcon(v.type)+' '+v.number+' <em style="font-weight:400;color:var(--ink-mu)">('+v.type+')</em></span>';
+  }).join(' ');
+  return '<div class="veh-info">'
+    +(parts.length?'<div class="vrow">'+parts.map(function(p){return '<span>'+p+'</span>';}).join(' &nbsp;|&nbsp; ')+ '</div>':'')
+    +(vChips?'<div class="vrow" style="margin-top:5px">'+vChips+'</div>':'')
+    +'</div>';
 }
-function cumPaid(fid, toYM){
-  let t=0, cur=NAV_START;
-  while(cur<=toYM){ if(allData[cur]?.contributions[fid]) t+=allData[cur].contributions[fid].paid||0; cur=nextYM(cur); }
-  return t;
-}
-function cumDue(fid, toYM){ return cumBaseDue(fid,toYM)+cumPenalty(fid,toYM); }
-function cumBal(fid, toYM){ return Math.max(0, cumDue(fid,toYM)-cumPaid(fid,toYM)); }
 
-// ── Society-wide totals ──
-// Total collected: sum of all flats' cumPaid from NAV_START to toYM
-function totCollected(toYM){
-  let t=0, cur=NAV_START;
-  while(cur<=toYM){
-    if(allData[cur]) FLATS.forEach(f=>{ t+=allData[cur].contributions[f.id]?.paid||0; });
-    cur=nextYM(cur);
-  }
-  return t;
+// current flat being edited in vehicle modal
+var editVehFid=null;
+function openVehicleModal(fid){
+  editVehFid=fid;
+  var f=FLATS.find(function(x){return x.id===fid;});
+  var det=getDetails(fid);
+  var isOwnFlat=(!isAdmin&&fid===currentUser); document.getElementById('veh-modal-title').textContent=isOwnFlat?'&#128221; My Contact & Vehicle Details':'&#9999; Edit Details — '+f.name+' · '+f.floor;
+  document.getElementById('veh-modal-sub').textContent=f.block;
+  document.getElementById('veh-owner').value=det.ownerName||'';
+  document.getElementById('veh-contact').value=det.contact||'';
+  renderVehEditList(det.vehicles||[]);
+  document.getElementById('vehicle-modal').style.display='flex';
 }
-// Total spent: sum of ALL expenses with date <= toYM (scans all stored months — no cycleStart restriction!)
-function totSpent(toYM){
-  let t=0;
-  Object.values(allData).forEach(md=>{
-    (md.expenses||[]).forEach(e=>{ if(e.date && e.date.substring(0,7)<=toYM) t+=e.amount; });
+function closeVehicleModal(){document.getElementById('vehicle-modal').style.display='none';editVehFid=null;}
+function renderVehEditList(vehicles){
+  var list=document.getElementById('veh-list-edit');
+  var html='';
+  (vehicles||[]).forEach(function(v,i){
+    var opts=VEH_TYPES.map(function(t){return '<option value="'+t+'"'+(t===v.type?' selected':'')+'>'+vehIcon(t)+' '+t+'</option>';}).join('');
+    html+='<div class="veh-row-edit" id="vr-'+i+'">'
+      +'<select id="vt-'+i+'">'+opts+'</select>'
+      +'<input type="text" class="fi" id="vn-'+i+'" value="'+v.number.replace(/"/g,'&quot;')+'" placeholder="Vehicle Number" style="font-size:13px;font-weight:600;text-transform:uppercase">'
+      +'<button class="btn btn-d btn-xs" onclick="removeVehRow('+i+')">✕</button>'
+      +'</div>';
   });
-  return t;
+  list.innerHTML=html;
+  list.dataset.count=String((vehicles||[]).length);
 }
-// Expenses for exactly one month (by expense date field)
-function expsForMonth(ym){
-  const seen=new Set(), res=[];
-  Object.values(allData).forEach(md=>{
-    (md.expenses||[]).forEach(e=>{
-      if(e.date && e.date.substring(0,7)===ym && !seen.has(e.id)){ seen.add(e.id); res.push(e); }
+function addVehicleRow(){
+  var list=document.getElementById('veh-list-edit');
+  var i=parseInt(list.dataset.count||'0');
+  var opts=VEH_TYPES.map(function(t){return '<option value="'+t+'">'+vehIcon(t)+' '+t+'</option>';}).join('');
+  var row=document.createElement('div');row.className='veh-row-edit';row.id='vr-'+i;
+  row.innerHTML='<select id="vt-'+i+'">'+opts+'</select>'
+    +'<input type="text" class="fi" id="vn-'+i+'" placeholder="Vehicle Number" style="font-size:13px;font-weight:600;text-transform:uppercase">'
+    +'<button class="btn btn-d btn-xs" onclick="removeVehRow('+i+')">✕</button>';
+  list.appendChild(row);list.dataset.count=String(i+1);
+}
+function removeVehRow(i){var r=document.getElementById('vr-'+i);if(r)r.remove();}
+function saveVehicleDetails(){
+  if(!editVehFid)return;
+  if(!cfg.flatDetails)cfg.flatDetails={};
+  var list=document.getElementById('veh-list-edit');
+  var count=parseInt(list.dataset.count||'0');
+  var vehicles=[];
+  for(var i=0;i<count;i++){
+    var te=document.getElementById('vt-'+i),ne=document.getElementById('vn-'+i);
+    if(!te||!ne)continue;
+    var num=ne.value.trim().toUpperCase();if(!num)continue;
+    vehicles.push({type:te.value,number:num});
+  }
+  cfg.flatDetails[editVehFid]={
+    ownerName:document.getElementById('veh-owner').value.trim(),
+    contact:document.getElementById('veh-contact').value.trim(),
+    vehicles:vehicles
+  };
+  closeVehicleModal();saveSt();renderFlatCards();
+  toast('\u2705 Details saved for '+flatDisplayName(editVehFid));
+}
+function flatDisplayName(fid){var f=FLATS.find(function(x){return x.id===fid;});return f?f.name+' \u00b7 '+f.floor:fid;}
+
+// ── CLOUD ──
+function setSyncBadge(state){
+  var el=document.getElementById('sync-badge');if(!el)return;
+  var map={on:'\u2601\ufe0f Live Sync',saving:'\u23f3 Saving\u2026',error:'\u274c Sync Error',off:'\ud83d\udcbe Local Only'};
+  var cls={on:'sync-on',saving:'sync-saving',error:'sync-error',off:'sync-off'};
+  el.textContent=map[state]||state;el.className='sync-badge '+(cls[state]||'sync-off');
+}
+function getSavedFbCfg(){try{var s=localStorage.getItem(FB_KEY);return s?JSON.parse(s):null;}catch(e){return null;}}
+function saveFbCfgLocal(fc){localStorage.setItem(FB_KEY,JSON.stringify(fc));}
+
+function initCloud(fbCfg){
+  if(!fbCfg||!fbCfg.apiKey||!fbCfg.projectId){setSyncBadge('off');return false;}
+  try{
+    var app=(typeof firebase!=='undefined'&&firebase.apps&&firebase.apps.length>0)?firebase.app():firebase.initializeApp(fbCfg);
+    db=firebase.firestore(app);cloudEnabled=true;setSyncBadge('on');startCloudListener();return true;
+  }catch(e){console.error('Firebase init error:',e);cloudEnabled=false;db=null;setSyncBadge('error');toast('\u26a0 Cloud connect failed: '+e.message);return false;}
+}
+function startCloudListener(){
+  if(!db)return;if(cloudUnsub)cloudUnsub();
+  var ref=db.collection('society406').doc('appdata');
+  cloudUnsub=ref.onSnapshot(function(snap){
+    // ignoreNextSnap was used to skip own-saves bouncing back.
+    // We reset it here but still process the snapshot so OTHER devices' changes always show.
+    var selfSave = ignoreNextSnap;
+    ignoreNextSnap = false;
+    if(!snap.exists){setSyncBadge('on');return;}
+    var d=snap.data();
+    if(d.cfg)cfg=Object.assign({},DEFAULT_CFG,d.cfg);
+    if(d.allData)allData=d.allData;
+    if(d.adminPin)adminPin=d.adminPin;
+    if(!cfg.flatNames)cfg.flatNames={};if(!cfg.flatDetails)cfg.flatDetails={};
+    applyFlatNames();fixOldData();ensureMonth(TODAY_YM);
+    try{localStorage.setItem(SK.cfg,JSON.stringify(cfg));localStorage.setItem(SK.data,JSON.stringify(allData));localStorage.setItem(SK.pin,adminPin);}catch(e){}
+    setSyncBadge('on');
+    // Always re-render — even on self-save, to keep all members in sync
+    if(currentUser){try{renderAll();}catch(e){console.error(e);}}
+  },function(err){console.error('Cloud listener:',err);setSyncBadge('error');});
+}
+function saveToCloud(){
+  if(!db||cloudSaving)return;cloudSaving=true;setSyncBadge('saving');ignoreNextSnap=true;
+  db.collection('society406').doc('appdata').set({cfg:cfg,allData:allData,adminPin:adminPin,updatedAt:firebase.firestore.FieldValue.serverTimestamp()})
+    .then(function(){setSyncBadge('on');cloudSaving=false;showSaveInd();})
+    .catch(function(e){console.error('Cloud save failed:',e);setSyncBadge('error');cloudSaving=false;ignoreNextSnap=false;saveLocal();toast('\u26a0 Cloud save failed \u2014 saved locally.');});
+}
+function saveLocal(){try{localStorage.setItem(SK.cfg,JSON.stringify(cfg));localStorage.setItem(SK.data,JSON.stringify(allData));localStorage.setItem(SK.pin,adminPin);}catch(e){console.warn(e);}}
+function saveSt(){saveLocal();if(cloudEnabled&&db){saveToCloud();}else{showSaveInd();}}
+function loadSt(){try{var c=localStorage.getItem(SK.cfg);if(c)cfg=Object.assign({},DEFAULT_CFG,JSON.parse(c));var d=localStorage.getItem(SK.data);if(d)allData=JSON.parse(d);var p=localStorage.getItem(SK.pin);if(p)adminPin=p;}catch(e){console.warn(e);}}
+function showSaveInd(){var o=document.getElementById('save-ind');if(o)o.remove();var el=document.createElement('div');el.id='save-ind';el.className='save-indicator';el.textContent=cloudEnabled?'\u2601\ufe0f Saved to Cloud':'\u2705 Saved';document.body.appendChild(el);setTimeout(function(){el.style.opacity='0';el.style.transition='opacity .4s';setTimeout(function(){el.remove();},450);},1800);}
+
+function fixOldData(){
+  var cs=contribStartYM();
+  Object.keys(allData).forEach(function(ym){
+    FLATS.forEach(function(f){
+      var c=allData[ym]&&allData[ym].contributions&&allData[ym].contributions[f.id];if(!c)return;
+      if(ym<cs){if((c.baseDue||0)===cfg.baseAmount)c.baseDue=0;c.penalty=0;c.arrears=0;}
+      var ap=c.paid||0,ps=(c.payments||[]).reduce(function(s,p){return s+(p.amt||0);},0);
+      if(ap===0&&(c.payments||[]).length>0){c.payments=[];}
+      else if(ap>0&&Math.abs(ps-ap)>0.01&&(c.payments||[]).length>0){var ld=c.payments[c.payments.length-1]&&c.payments[c.payments.length-1].date;c.payments=[{amt:ap,date:ld||ym+'-01',note:'Reconciled'}];}
     });
   });
-  return res.sort((a,b)=>new Date(b.date)-new Date(a.date));
-}
-function totPending(toYM){ return FLATS.reduce((s,f)=>s+cumBal(f.id,toYM),0); }
-function paidCnt(toYM)   { return FLATS.filter(f=>cumBal(f.id,toYM)===0).length; }
-
-function getStatus(fid, ym){
-  const c = getMD(ym).contributions[fid];
-  if(c.statusOverride) return c.statusOverride;
-  if(flatBal(fid,ym)===0) return 'paid';
-  const live=ym===TODAY_YM, d=live?dom():0;
-  if(penaltyActive(ym) && d>cfg.penaltyDay) return 'danger';
-  if(d>cfg.warnDay) return 'warn';
-  return 'ok';
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  PERSISTENCE  —  Firebase (shared/live) + localStorage (fallback)
-// ═══════════════════════════════════════════════════════════════
-
-// ── SAVE ──────────────────────────────────────────────────────
-// Writes to BOTH localStorage (instant) AND Firebase (shared).
-// PIN is intentionally kept in localStorage only for security.
-function saveSt(){
-  // 1. localStorage — always, instant
-  try{
-    localStorage.setItem(SK.cfg,  JSON.stringify(cfg));
-    localStorage.setItem(SK.data, JSON.stringify(allData));
-    localStorage.setItem(SK.pin,  adminPin);
-  }catch(e){ console.warn('localStorage save failed',e); }
-
-  // 2. Firebase — async, non-blocking
-  if(window._fbReady){
-    const FB = window._FB;
-    window._fbSet(FB+'cfg',  JSON.parse(JSON.stringify(cfg)))
-      .catch(e=>console.warn('Firebase cfg save:',e));
-    window._fbSet(FB+'data', JSON.parse(JSON.stringify(allData)))
-      .catch(e=>console.warn('Firebase data save:',e));
-  }
-
-  showSaveInd();
-}
-
-// ── LOAD ──────────────────────────────────────────────────────
-// On startup: loads localStorage immediately (fast first paint),
-// then loads Firebase (authoritative) and refreshes the UI.
-function loadSt(){
-  // Fast path — localStorage
-  try{
-    const c=localStorage.getItem(SK.cfg);  if(c) cfg={...DEFAULT_CFG,...JSON.parse(c)};
-    const d=localStorage.getItem(SK.data); if(d) allData=JSON.parse(d);
-    const p=localStorage.getItem(SK.pin);  if(p) adminPin=p;
-  }catch(e){ console.warn('localStorage load failed',e); }
-
-  // Authoritative path — Firebase
-  // If Firebase is already initialised, load now; otherwise wait for the event.
-  if(window._fbReady){ _loadFirebase(); }
-  else { document.addEventListener('firebase-ready', _loadFirebase, {once:true}); }
-}
-
-function _loadFirebase(){
-  if(!window._fbGet) return;
-  const FB = window._FB;
-  window._fbGet(FB+'cfg').then(fbCfg=>{
-    if(fbCfg){
-      cfg = {...DEFAULT_CFG, ...fbCfg};
-      localStorage.setItem(SK.cfg, JSON.stringify(cfg));
-    }
-    return window._fbGet(FB+'data');
-  }).then(fbData=>{
-    if(fbData){
-      allData = fbData;
-      localStorage.setItem(SK.data, JSON.stringify(allData));
-    }
-    // Re-run init steps so UI reflects Firebase data
-    cfg = {...DEFAULT_CFG, ...cfg};
-    fixOldData();
-    ensureMonth(TODAY_YM);
-    if(currentUser) renderAll();       // refresh if user is already logged in
-    _updateFbBadge(true);
-    _startLiveListeners();             // begin real-time sync
-  }).catch(e=>{
-    console.warn('Firebase load failed — using local data.',e);
-    _updateFbBadge(false);
-  });
-}
-
-// ── LIVE LISTENERS ────────────────────────────────────────────
-// Keep every browser tab in sync: when admin saves, members see
-// the update automatically within ~1–2 seconds.
-let _listening = false;
-function _startLiveListeners(){
-  if(_listening || !window._fbListen) return;
-  _listening = true;
-  const FB = window._FB;
-
-  window._fbListen(FB+'cfg', fbCfg=>{
-    if(!fbCfg) return;
-    if(JSON.stringify(fbCfg)===JSON.stringify(cfg)) return; // no change
-    cfg = {...DEFAULT_CFG, ...fbCfg};
-    localStorage.setItem(SK.cfg, JSON.stringify(cfg));
-    if(currentUser) renderAll();
-  });
-
-  window._fbListen(FB+'data', fbData=>{
-    if(!fbData) return;
-    if(JSON.stringify(fbData)===JSON.stringify(allData)) return; // no change
-    allData = fbData;
-    localStorage.setItem(SK.data, JSON.stringify(allData));
-    fixOldData();
-    ensureMonth(TODAY_YM);
-    if(currentUser) renderAll();
-  });
-}
-
-// ── STATUS BADGE ──────────────────────────────────────────────
-function _updateFbBadge(online){
-  const el=document.getElementById('fb-badge');
-  if(!el) return;
-  if(online){
-    el.textContent='🔥 Live';
-    el.style.cssText='font-size:11px;padding:3px 9px;border-radius:20px;font-weight:600;background:rgba(45,122,79,.3);color:rgba(74,221,128,.95);border:1px solid rgba(74,221,128,.3)';
-  } else {
-    el.textContent='💾 Offline';
-    el.style.cssText='font-size:11px;padding:3px 9px;border-radius:20px;font-weight:600;background:rgba(176,96,0,.25);color:rgba(255,193,70,.9);border:1px solid rgba(176,96,0,.3)';
-  }
-}
-
-// ── showSaveInd ───────────────────────────────────────────────
-function showSaveInd(){
-  const old=document.getElementById('save-ind'); if(old) old.remove();
-  const el=document.createElement('div'); el.id='save-ind'; el.className='save-indicator';
-  el.innerHTML=window._fbReady?'🔥 Saved &amp; synced to all members':'✅ Saved locally';
-  document.body.appendChild(el);
-  setTimeout(()=>{ el.style.opacity='0'; el.style.transition='opacity .4s'; setTimeout(()=>el.remove(),450); },2200);
-}
-
-// Fix stale data: ensure pre-contribStart months have baseDue=0, penalty=0
-// (protects against importing old v2 data that had baseDue=500 for all months)
-function fixOldData(){
-  const cs = contribStartYM();
-  Object.keys(allData).forEach(ym=>{
-    if(ym < cs){
-      FLATS.forEach(f=>{
-        const c = allData[ym].contributions?.[f.id];
-        if(c){
-          if((c.baseDue||0) === cfg.baseAmount) c.baseDue = 0;
-          c.penalty = 0; c.arrears  = 0;
-        }
-      });
-    }
-  });
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  MONTH PICKER — Year (2025-2070) + Month (Jan-Dec) dropdowns
-//  Both ct-mpk and exp-mpk share the same viewMonth (globally synced)
-// ═══════════════════════════════════════════════════════════════
+// ── MONTH PICKER ──
 function buildPicker(cid){
-  const el = document.getElementById(cid); if(!el) return;
-  const selY = +viewMonth.split('-')[0];
-  const selM = +viewMonth.split('-')[1];
-  const live  = viewMonth===TODAY_YM;
-  const fut   = viewMonth>TODAY_YM;
-
-  // Year: 2025 to 2070 (admin can go 1 year ahead)
-  let yOpts='';
-  for(let y=2025;y<=2070;y++) yOpts+=`<option value="${y}" ${y===selY?'selected':''}>${y}</option>`;
-
-  // Month: Jan to Dec
-  let mOpts='';
-  SMON.forEach((m,i)=>{ mOpts+=`<option value="${i+1}" ${i+1===selM?'selected':''}>${m}</option>`; });
-
-  const badge = isAdmin ? (fut?'🔮 Future':live?'🟢 Live':'📂 Historic') : (live?'📅 Current':'📂 Historic');
-  const bCls  = fut ? 'mpk-badge' : live ? 'mpk-badge is-live' : 'mpk-badge';
-
-  el.innerHTML=`
-    <span class="mpk-label">📅 Period:</span>
-    <div class="sw" style="min-width:68px">
-      <select class="fi" id="${cid}-m" style="height:34px;padding:5px 24px 5px 8px;font-size:14px;font-weight:600;color:var(--ink)"
-        onchange="onPick('${cid}')">${mOpts}</select>
-    </div>
-    <div class="sw" style="min-width:68px">
-      <select class="fi" id="${cid}-y" style="height:34px;padding:5px 24px 5px 8px;font-size:14px;font-weight:600;color:var(--ink)"
-        onchange="onPick('${cid}')">${yOpts}</select>
-    </div>
-    ${!live?`<button class="mpk-today" onclick="goToday()">↩ Today</button>`:''}
-    <span class="${bCls}">${badge}</span>`;
+  var el=document.getElementById(cid);if(!el)return;
+  var selY=+viewMonth.split('-')[0],selM=+viewMonth.split('-')[1];
+  var live=viewMonth===TODAY_YM,fut=viewMonth>TODAY_YM;
+  var yOpts='';for(var y=2025;y<=2070;y++)yOpts+='<option value="'+y+'"'+(y===selY?' selected':'')+'>'+y+'</option>';
+  var mOpts='';SMON.forEach(function(m,i){mOpts+='<option value="'+(i+1)+'"'+(i+1===selM?' selected':'')+'>'+m+'</option>';});
+  var badge=isAdmin?(fut?'\ud83d\udd2e Future':live?'\ud83d\udfe2 Live':'\ud83d\udcc2 Historic'):(live?'\ud83d\udcc5 Current':'\ud83d\udcc2 Historic');
+  var bCls=fut?'mpk-badge':live?'mpk-badge is-live':'mpk-badge';
+  el.innerHTML='<span class="mpk-label">\ud83d\udcc5 Period:</span>'
+    +'<div class="sw" style="min-width:68px"><select class="fi" id="'+cid+'-m" style="height:34px;padding:5px 24px 5px 8px;font-size:14px;font-weight:600;color:var(--ink)" onchange="onPick(\''+cid+'\')">'+mOpts+'</select></div>'
+    +'<div class="sw" style="min-width:68px"><select class="fi" id="'+cid+'-y" style="height:34px;padding:5px 24px 5px 8px;font-size:14px;font-weight:600;color:var(--ink)" onchange="onPick(\''+cid+'\')">'+yOpts+'</select></div>'
+    +(live?'':'<button class="mpk-today" onclick="goToday()">\u21a9 Today</button>')
+    +'<span class="'+bCls+'">'+badge+'</span>';
   el.classList.remove('hidden');
 }
-
 function onPick(cid){
-  const m = +document.getElementById(cid+'-m').value;
-  const y = +document.getElementById(cid+'-y').value;
-  const ym = y+'-'+String(m).padStart(2,'0');
-  if(ym < NAV_START){ toast('⚠ Cannot go before October 2025'); return; }
-  if(!isAdmin && ym > TODAY_YM){ toast('⚠ Future months are admin-only'); return; }
+  var m=+document.getElementById(cid+'-m').value,y=+document.getElementById(cid+'-y').value;
+  var ym=y+'-'+String(m).padStart(2,'0');
+  if(ym<NAV_START){toast('\u26a0 Cannot go before October 2025');return;}
+  if(!isAdmin&&ym>TODAY_YM){toast('\u26a0 Future months are admin-only');return;}
   setView(ym);
 }
-function goToday(){ setView(TODAY_YM); }
-function setView(ym){ viewMonth=ym; ensureMonth(ym); renderAll(); }
-
+function goToday(){setView(TODAY_YM);}
+function setView(ym){viewMonth=ym;ensureMonth(ym);renderAll();}
 function renderPickers(){
-  // Overview: NO picker (always current month, no filter)
-  const ovMpk=document.getElementById('ov-mpk'); if(ovMpk) ovMpk.innerHTML='';
-
-  // Contributions + Expenses share the same picker & viewMonth
-  buildPicker('ct-mpk');
-  buildPicker('exp-mpk');
-
-  // Labels
-  document.getElementById('ov-month-lbl').textContent = monthLabel(TODAY_YM)+'  (Current Month)';
-  const isFut=viewMonth>TODAY_YM;
-  const vmLbl=isFut?monthLabel(viewMonth)+' → data from '+monthLabel(TODAY_YM):monthLabel(viewMonth);
-  document.getElementById('ct-month-lbl').textContent = vmLbl;
-  const eml=document.getElementById('exp-month-lbl'); if(eml) eml.textContent='— '+vmLbl;
-  const dlb=document.getElementById('dl-month-lbl');  if(dlb) dlb.textContent='Full Report (Oct 2025 – '+monthLabel(TODAY_YM)+')';
+  var ovMpk=document.getElementById('ov-mpk');if(ovMpk)ovMpk.innerHTML='';
+  buildPicker('ct-mpk');buildPicker('exp-mpk');
+  document.getElementById('ov-month-lbl').textContent=monthLabel(TODAY_YM)+'  (Current Month)';
+  var isFut=viewMonth>TODAY_YM;
+  var vmLbl=isFut?monthLabel(viewMonth)+' \u2192 data from '+monthLabel(TODAY_YM):monthLabel(viewMonth);
+  document.getElementById('ct-month-lbl').textContent=vmLbl;
+  var eml=document.getElementById('exp-month-lbl');if(eml)eml.textContent='\u2014 '+vmLbl;
+  var dlb=document.getElementById('dl-month-lbl');if(dlb)dlb.textContent='Full Report (Oct 2025 \u2013 '+monthLabel(TODAY_YM)+')';
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  LOGIN / LOGOUT
-// ═══════════════════════════════════════════════════════════════
+// ── LOGIN ──
+function refreshLoginDropdown(){
+  var sel=document.getElementById('lg-flat');if(!sel)return;
+  var cur=sel.value;
+  var opts='<option value="">\u2014 Choose your flat \u2014</option>';
+  FLATS.forEach(function(f){opts+='<option value="'+f.id+'">\ud83c\udfe0 '+f.name+' \u00b7 '+f.floor+'</option>';});
+  opts+='<option value="admin">\ud83d\udd10 Admin (Society Manager)</option>';
+  sel.innerHTML=opts;sel.value=cur;
+}
 function onFlatChange(){
-  const v=document.getElementById('lg-flat').value;
-  const ap=document.getElementById('adm-panel');
-  const rp=document.getElementById('rst-panel');
-  // Always clear inline style first so CSS class rules can take effect
+  var v=document.getElementById('lg-flat').value;
+  var ap=document.getElementById('adm-panel'),rp=document.getElementById('rst-panel');
   ap.style.display='';
-  if(v==='admin'){
-    ap.classList.add('show');
-  } else {
-    ap.classList.remove('show');
-    rp.classList.remove('show');
-  }
+  if(v==='admin'){ap.classList.add('show');}else{ap.classList.remove('show');rp.classList.remove('show');}
 }
-function showRst(){
-  document.getElementById('adm-panel').style.display='none';
-  document.getElementById('rst-panel').classList.add('show');
-}
-function hideRst(){
-  document.getElementById('adm-panel').style.display='';
-  document.getElementById('rst-panel').classList.remove('show');
-}
+function showRst(){document.getElementById('adm-panel').style.display='none';document.getElementById('rst-panel').classList.add('show');}
+function hideRst(){document.getElementById('adm-panel').style.display='';document.getElementById('rst-panel').classList.remove('show');}
 function doRst(){
-  const ans=document.getElementById('sec-ans').value.trim().toLowerCase().replace(/\s+/g,'');
-  const np =document.getElementById('rst-pin').value;
-  if(!['society406','406'].includes(ans)){ toast('❌ Wrong answer — hint: "Society 406"'); return; }
-  if(!np||np.length<4){ toast('⚠ PIN must be ≥ 4 digits'); return; }
-  adminPin=np; saveSt();
-  toast('✅ PIN reset! Logging you in…');
-  setTimeout(()=>{ isAdmin=true; currentUser='admin'; launch(); },700);
+  var ans=document.getElementById('sec-ans').value.trim().toLowerCase().replace(/\s+/g,'');
+  var np=document.getElementById('rst-pin').value;
+  if(['society406','406'].indexOf(ans)===-1){toast('\u274c Wrong answer');return;}
+  if(!np||np.length<4){toast('\u26a0 PIN \u2265 4 digits');return;}
+  adminPin=np;saveSt();toast('\u2705 PIN reset!');
+  setTimeout(function(){isAdmin=true;currentUser='admin';launch();},700);
 }
 function doLogin(){
-  const flat=document.getElementById('lg-flat').value;
-  if(!flat){ toast('⚠ Please select your flat'); return; }
+  var flat=document.getElementById('lg-flat').value;
+  if(!flat){toast('\u26a0 Please select your flat');return;}
   if(flat==='admin'){
-    if(document.getElementById('rst-panel').classList.contains('show')){ doRst(); return; }
-    if(document.getElementById('lg-pin').value!==adminPin){ toast('❌ Incorrect PIN'); return; }
-    isAdmin=true; currentUser='admin';
-  } else { isAdmin=false; currentUser=flat; }
+    if(document.getElementById('rst-panel').classList.contains('show')){doRst();return;}
+    if(document.getElementById('lg-pin').value!==adminPin){toast('\u274c Incorrect PIN');return;}
+    isAdmin=true;currentUser='admin';
+  }else{isAdmin=false;currentUser=flat;}
   launch();
 }
-function launch(){
-  document.getElementById('login-screen').style.display='none';
-  document.getElementById('app').style.display='block';
-  setupApp();
-}
+function launch(){document.getElementById('login-screen').style.display='none';document.getElementById('app').style.display='block';setupApp();}
 function doLogout(){
-  currentUser=null; isAdmin=false;
-  document.getElementById('login-screen').style.display='flex';
-  document.getElementById('app').style.display='none';
-  ['lg-pin','sec-ans','rst-pin'].forEach(i=>{ const e=document.getElementById(i); if(e) e.value=''; });
+  currentUser=null;isAdmin=false;
+  document.getElementById('login-screen').style.display='flex';document.getElementById('app').style.display='none';
+  ['lg-pin','sec-ans','rst-pin'].forEach(function(i){var e=document.getElementById(i);if(e)e.value='';});
   document.getElementById('lg-flat').value='';
-  const ap=document.getElementById('adm-panel');
-  const rp=document.getElementById('rst-panel');
-  ap.classList.remove('show');
-  rp.classList.remove('show');
-  ap.style.display='';  // always clear inline style so next login works
+  var ap=document.getElementById('adm-panel'),rp=document.getElementById('rst-panel');
+  ap.classList.remove('show');rp.classList.remove('show');ap.style.display='';
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  APP SETUP
-// ═══════════════════════════════════════════════════════════════
+// ── SETUP ──
 function setupApp(){
-  viewMonth = TODAY_YM;   // always default to current month on every login
-  ensureMonth(viewMonth);
-
-  const fObj=FLATS.find(f=>f.id===currentUser);
-  const name=isAdmin?'Admin':(fObj?fObj.name+' · '+fObj.floor:currentUser);
+  viewMonth=TODAY_YM;ensureMonth(viewMonth);
+  var fObj=FLATS.find(function(f){return f.id===currentUser;});
+  var name=isAdmin?'Admin':(fObj?fObj.name+' \u00b7 '+fObj.floor:currentUser);
   document.getElementById('u-nm').textContent=name;
-  document.getElementById('u-av').textContent=isAdmin?'🛡':'🏠';
+  document.getElementById('u-av').textContent=isAdmin?'\ud83d\udee1':'\ud83c\udfe0';
   document.getElementById('u-av').style.background=isAdmin?'rgba(201,168,76,.2)':(fObj?fObj.bg:'#eee');
   document.getElementById('u-role').textContent=isAdmin?'ADMIN':'MEMBER';
   document.getElementById('u-role').className='r-pill '+(isAdmin?'r-adm':'r-mem');
   document.getElementById('tb-date').textContent=TODAY.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
-
-  ['overview','contrib','expenses','pay','admin','settings'].forEach(t=>{
-    document.getElementById('tab-'+t).classList.add('hidden');
-  });
-  ['overview','contrib','expenses','pay'].forEach(t=>document.getElementById('tab-'+t).classList.remove('hidden'));
-
+  ['overview','contrib','expenses','pay','admin','settings'].forEach(function(t){document.getElementById('tab-'+t).classList.add('hidden');});
+  ['overview','contrib','expenses','pay'].forEach(function(t){document.getElementById('tab-'+t).classList.remove('hidden');});
   if(isAdmin){
-    ['tab-admin','tab-settings'].forEach(t=>document.getElementById(t).classList.remove('hidden'));
-    document.getElementById('add-exp-btn').classList.remove('hidden');
-    document.getElementById('act-col').classList.remove('hidden');
-    populateAdmSelects();
-    loadCfgForm();
-  } else {
-    document.getElementById('act-col').classList.add('hidden');
-    document.getElementById('add-exp-btn').classList.add('hidden');
-  }
-  renderAll();
-  showTab('overview');
+    ['tab-admin','tab-settings'].forEach(function(t){document.getElementById(t).classList.remove('hidden');});
+    document.getElementById('add-exp-btn').classList.remove('hidden');document.getElementById('act-col').classList.remove('hidden');
+    populateAdmSelects();loadCfgForm();
+  }else{document.getElementById('act-col').classList.add('hidden');document.getElementById('add-exp-btn').classList.add('hidden');}
+  renderAll();showTab('overview');
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  RENDER ALL
-// ═══════════════════════════════════════════════════════════════
+// ── RENDER ALL ──
 function renderAll(){
   try{
-    const mh=document.getElementById('member-history-section'); if(mh) mh.remove();
-    renderPickers();
-    renderAlert();
-    renderStats();        // Overview — always TODAY_YM, cumulative
-    renderCycleBar();
-    renderFlatCards();    // Overview — always TODAY_YM, cumulative per flat
-    renderContribTable(); // Contributions — uses viewMonth, cumulative up to viewMonth
-    renderExpenses();     // Expenses — uses viewMonth, that month only
-    renderRulesBox();
-    renderPayPage();
-  }catch(err){ console.error('renderAll error:',err); }
+    var mh=document.getElementById('member-history-section');if(mh)mh.remove();
+    renderPickers();renderAlert();renderStats();renderCycleBar();
+    renderFlatCards();renderContribTable();renderExpenses();renderRulesBox();renderPayPage();
+  }catch(err){console.error('renderAll:',err);}
 }
 
-// ── ALERT (always reflects current month) ──
 function renderAlert(){
-  const d=dom(), ym=TODAY_YM;
-  const fill=(aid,forMember)=>{
-    let cls,ico,title,body;
+  var d=dom(),ym=TODAY_YM;
+  function fill(aid,forMember){
+    var cls,ico,title,body;
     if(penaltyActive(ym)&&d>cfg.penaltyDay){
-      cls='ab-danger'; ico='🚨'; title='Penalty Active!';
-      if(forMember&&currentUser&&currentUser!=='admin'){
-        const cb=cumBal(currentUser,ym);
-        body=cb>0?`Your flat owes ₹${cb} including penalty. Pay immediately!`:'Your flat is fully paid ✅';
-      } else {
-        body=`Deadline passed (${ord(cfg.penaltyDay)}). ₹${cfg.penaltyAmt}/day penalty on unpaid flats.`;
-      }
-    } else if(d>cfg.warnDay){
-      cls='ab-warn'; ico='⏰'; title='Deadline Approaching!';
-      if(forMember&&currentUser&&currentUser!=='admin'){
-        const cb=cumBal(currentUser,ym);
-        body=cb>0?`₹${cb} due. ${cfg.penaltyDay-d} day(s) left!`:'Your flat is fully paid ✅';
-      } else {
-        body=`${cfg.penaltyDay-d} day(s) before ₹${cfg.penaltyAmt}/day penalty starts.`;
-      }
-    } else {
-      cls='ab-ok'; ico='📅'; title='Monthly Contribution Due';
-      if(forMember&&currentUser&&currentUser!=='admin'){
-        const cb=cumBal(currentUser,ym);
-        body=cb>0?`₹${cb} due for ${monthLabel(ym)}. Pay before ${ord(cfg.penaltyDay)}.`:`Your flat is paid for ${monthLabel(ym)} ✅`;
-      } else {
-        body=`₹${cfg.baseAmount} due for ${monthLabel(ym)}. Pay before ${ord(cfg.penaltyDay)}.`;
-      }
+      cls='ab-danger';ico='\ud83d\udea8';title='Penalty Active!';
+      if(forMember&&currentUser&&currentUser!=='admin'){var cb=cumBal(currentUser,ym);body=cb>0?'Your flat owes \u20b9'+cb+' incl. penalty. Pay immediately!':'Your flat is fully paid \u2705';}
+      else body='Deadline passed ('+ord(cfg.penaltyDay)+'). \u20b9'+cfg.penaltyAmt+'/day penalty running.';
+    }else if(d>cfg.warnDay){
+      cls='ab-warn';ico='\u23f0';title='Deadline Approaching!';
+      if(forMember&&currentUser&&currentUser!=='admin'){var cb2=cumBal(currentUser,ym);body=cb2>0?'\u20b9'+cb2+' due. '+(cfg.penaltyDay-d)+' day(s) left!':'Your flat is fully paid \u2705';}
+      else body=(cfg.penaltyDay-d)+' day(s) before \u20b9'+cfg.penaltyAmt+'/day penalty.';
+    }else{
+      cls='ab-ok';ico='\ud83d\udcc5';title='Monthly Contribution Due';
+      if(forMember&&currentUser&&currentUser!=='admin'){var cb3=cumBal(currentUser,ym);body=cb3>0?'\u20b9'+cb3+' due for '+monthLabel(ym)+'. Pay before '+ord(cfg.penaltyDay)+'.':'Your flat is paid \u2705';}
+      else body='\u20b9'+cfg.baseAmount+' due for '+monthLabel(ym)+'. Pay before '+ord(cfg.penaltyDay)+'.';
     }
-    const el=document.getElementById(aid);
-    if(el) el.innerHTML=`<div class="ab ${cls}"><div class="ab-ico">${ico}</div><div class="ab-body"><strong>${title}</strong><span>${body}</span></div></div>`;
-  };
-  fill('ov-alert',!isAdmin);
-  fill('ct-alert',!isAdmin);
-}
-
-// ── STATS: Overview always shows TODAY_YM cumulative ──
-function renderStats(){
-  const ym = TODAY_YM;   // ← FIXED: Overview never changes; always current month
-  const col = totCollected(ym);
-  const spt = totSpent(ym);     // ← FIXED: scans ALL stored data, not filtered by cycleStart
-  const bal = col - spt;        // ← FIXED: society balance correctly deducts expenses
-  const pnd = totPending(ym);
-  const clr = paidCnt(ym);
-
-  document.getElementById('s-col').textContent = '₹'+col.toLocaleString('en-IN');
-  document.getElementById('s-spt').textContent = '₹'+spt.toLocaleString('en-IN');
-  document.getElementById('s-bal').textContent = (bal<0?'-':'')+'₹'+Math.abs(bal).toLocaleString('en-IN');
-  document.getElementById('s-bal').className   = 'sc-vl '+(bal>=0?'t':'r');
-  document.getElementById('s-bal-sub').textContent = bal<0?'⚠ Deficit!':'Available funds';
-  document.getElementById('s-pnd').textContent = '₹'+pnd.toLocaleString('en-IN');
-  document.getElementById('s-pnd-sub').textContent = FLATS.filter(f=>cumBal(f.id,ym)>0).length+' flat(s) pending';
-  document.getElementById('s-clr').textContent = clr+'/7';
-  const cs=document.getElementById('s-col-sub'); if(cs) cs.textContent='Oct 2025 – '+monthLabel(ym);
-  const cl=document.getElementById('s-clr-sub'); if(cl) cl.textContent='Paid as of '+monthLabel(ym);
-}
-
-// ── CYCLE BAR ──
-function renderCycleBar(){
-  const steps=[
-    {day:cfg.startDay,  label:'Cycle Start',    icon:'📌',cls:'cs-start'},
-    {day:cfg.warnDay,   label:'Warning Alert',  icon:'⚠', cls:'cs-warn'},
-    {day:cfg.penaltyDay,label:'Penalty Active', icon:'🔴',cls:'cs-pen'},
-    {day:cfg.updateDay, label:'Month Reset',    icon:'🔄',cls:'cs-start'},
-  ];
-  const d=dom();
-  if(!steps.find(s=>s.day===d)) steps.push({day:d,label:'Today',icon:'📍',cls:'cs-today'});
-  steps.sort((a,b)=>a.day-b.day);
-  document.getElementById('cyc-track').innerHTML=steps.map(s=>`
-    <div class="cyc-step ${s.cls}${s.day===d?' cs-today':''}">
-      <div class="cyc-dot">${s.icon}</div>
-      <div class="cyc-day">${ord(s.day)}</div>
-      <div class="cyc-lbl">${s.label}${s.day===d?' (Today)':''}</div>
-    </div>`).join('');
-}
-
-// ── FLAT CARDS: Overview, always TODAY_YM, CUMULATIVE values ──
-function renderFlatCards(){
-  const ym=TODAY_YM;  // ← Overview always current month
-  const g=document.getElementById('flats-grid');
-  g.innerHTML='';
-  FLATS.forEach(f=>{
-    const bd   = cumBaseDue(f.id,ym);
-    const pen  = cumPenalty(f.id,ym);
-    const paid = cumPaid(f.id,ym);
-    const due  = bd+pen;
-    const bal  = Math.max(0,due-paid);
-    const pct  = due>0?Math.min(100,Math.round(paid/due*100)):100;
-    // Status based on current month's per-month data
-    const s=getStatus(f.id,ym);
-    const sM={paid:['sb-paid','✅ Paid','pf-paid','fc-paid'],warn:['sb-warn','⚠ Due Soon','pf-warn','fc-warn'],
-              danger:['sb-danger','🔴 Overdue','pf-danger','fc-danger'],ok:['sb-ok','🔵 Pending','pf-ok','fc-ok']};
-    const [sbC,sbT,pfC,fcC]=sM[s]||sM.ok;
-    const isMe=!isAdmin&&f.id===currentUser;
-    g.innerHTML+=`<div class="fc ${fcC}" style="${isMe?'box-shadow:0 0 0 3px '+f.color+';':''}">
-      <div class="fc-top">
-        <div class="fc-info">
-          <div class="fc-av" style="background:${f.bg};color:${f.color}">${f.emoji}</div>
-          <div>
-            <div class="fc-nm">${f.name}${isMe?' <span style="font-size:10px;background:'+f.color+';color:#fff;padding:1px 6px;border-radius:10px;vertical-align:middle">You</span>':''}</div>
-            <div class="fc-fl">${f.floor} · ${f.block}</div>
-          </div>
-        </div>
-        <div class="sb ${sbC}">${sbT}</div>
-      </div>
-      ${pen>0?`<div class="pen-tag">⚠ Penalty: ₹${pen}</div>`:''}
-      <div class="pw">
-        <div class="pl"><span>${pct}% paid</span><span>₹${paid} / ₹${due}</span></div>
-        <div class="pb"><div class="pf ${pfC}" style="width:${pct}%"></div></div>
-      </div>
-      <div class="fa">
-        <div class="fai"><div class="fai-l">Base Due</div><div class="fai-v">₹${bd}</div></div>
-        <div class="fai"><div class="fai-l">Penalty</div><div class="fai-v" style="color:${pen>0?'#b02020':'#aaa'}">${pen>0?'₹'+pen:'—'}</div></div>
-        <div class="fai"><div class="fai-l">Paid</div><div class="fai-v" style="color:#2d7a4f">₹${paid}</div></div>
-        <div class="fai"><div class="fai-l">Balance</div><div class="fai-v" style="color:${bal>0?'#b02020':'#2d7a4f'}">${bal>0?'₹'+bal:'Clear ✓'}</div></div>
-      </div>
-      <div style="margin-top:8px;font-size:10px;color:var(--ink-mu);text-align:center;padding:4px 8px;background:var(--cream-dk);border-radius:6px">
-        📊 Cumulative: Oct 2025 – ${monthLabel(ym)}
-      </div>
-    </div>`;
-  });
-}
-
-// ── CONTRIBUTIONS TABLE: uses displayMonth() — future months show current data ──
-function renderContribTable(){
-  const ym=displayMonth();  // future months redirect to current month
-  const tb=document.getElementById('ct-body');
-  tb.innerHTML='';
-
-  // Future month selected: show a notice, then continue to render current data
-  if(viewMonth > TODAY_YM){
-    tb.innerHTML='<tr><td colspan="10" style="padding:14px 18px;background:var(--amber-lt);color:var(--amber);font-size:13px;border-radius:8px">'+
-      '📅 Viewing '+monthLabel(viewMonth)+' — showing '+monthLabel(TODAY_YM)+' data until 1st '+monthLabel(viewMonth)+' arrives.</td></tr>';
+    var el=document.getElementById(aid);
+    if(el)el.innerHTML='<div class="ab '+cls+'"><div class="ab-ico">'+ico+'</div><div class="ab-body"><strong>'+title+'</strong><span>'+body+'</span></div></div>';
   }
+  fill('ov-alert',!isAdmin);fill('ct-alert',!isAdmin);
+}
 
+function renderStats(){
+  var ym=TODAY_YM;
+  var col=totCollected(ym),spt=totSpent(ym),bal=col-spt,pnd=totPending(ym),clr=paidCnt(ym);
+  document.getElementById('s-col').textContent='\u20b9'+col.toLocaleString('en-IN');
+  document.getElementById('s-spt').textContent='\u20b9'+spt.toLocaleString('en-IN');
+  document.getElementById('s-bal').textContent=(bal<0?'-':'')+'\u20b9'+Math.abs(bal).toLocaleString('en-IN');
+  document.getElementById('s-bal').className='sc-vl '+(bal>=0?'t':'r');
+  document.getElementById('s-bal-sub').textContent=bal<0?'\u26a0 Deficit!':'Available funds';
+  document.getElementById('s-pnd').textContent='\u20b9'+pnd.toLocaleString('en-IN');
+  document.getElementById('s-pnd-sub').textContent=FLATS.filter(function(f){return cumBal(f.id,ym)>0;}).length+' flat(s) pending';
+  document.getElementById('s-clr').textContent=clr+'/7';
+  var cs=document.getElementById('s-col-sub');if(cs)cs.textContent='Oct 2025 \u2013 '+monthLabel(ym);
+  var cl=document.getElementById('s-clr-sub');if(cl)cl.textContent='Paid as of '+monthLabel(ym);
+}
 
-  // Member notice
-  const notice=document.getElementById('ct-my-flat-notice');
-  if(!isAdmin&&notice){
-    const fObj=FLATS.find(f=>f.id===currentUser);
-    notice.classList.remove('hidden');
-    notice.innerHTML=`<div style="background:linear-gradient(135deg,${fObj?fObj.bg:'#e0f4f4'},rgba(255,255,255,.5));border:1px solid ${fObj?fObj.color+'33':'rgba(13,115,119,.2)'};border-radius:var(--rsm);padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px">
-      <span style="font-size:22px">${fObj?fObj.emoji:'🏠'}</span>
-      <div><div style="font-size:14px;font-weight:600;color:var(--ink)">${fObj?fObj.name+' · '+fObj.floor:'Your Flat'}</div>
-      <div style="font-size:12px;color:var(--ink-mu)">Cumulative contributions up to ${monthLabel(ym)}</div></div></div>`;
-  } else if(notice){ notice.classList.add('hidden'); }
+function renderCycleBar(){
+  var steps=[{day:cfg.startDay,label:'Cycle Start',icon:'\ud83d\udccc',cls:'cs-start'},{day:cfg.warnDay,label:'Warning Alert',icon:'\u26a0',cls:'cs-warn'},{day:cfg.penaltyDay,label:'Penalty Active',icon:'\ud83d\udd34',cls:'cs-pen'},{day:cfg.updateDay,label:'Month Reset',icon:'\ud83d\udd04',cls:'cs-start'}];
+  var d=dom();if(!steps.find(function(s){return s.day===d;}))steps.push({day:d,label:'Today',icon:'\ud83d\udccd',cls:'cs-today'});
+  steps.sort(function(a,b){return a.day-b.day;});
+  document.getElementById('cyc-track').innerHTML=steps.map(function(s){
+    return '<div class="cyc-step '+s.cls+(s.day===d?' cs-today':'')+'"><div class="cyc-dot">'+s.icon+'</div><div class="cyc-day">'+ord(s.day)+'</div><div class="cyc-lbl">'+s.label+(s.day===d?' (Today)':'')+'</div></div>';
+  }).join('');
+}
 
-  const flats=isAdmin?FLATS:FLATS.filter(f=>f.id===currentUser);
-
-  flats.forEach(f=>{
-    // CUMULATIVE values for display
-    const bd   = cumBaseDue(f.id,ym);
-    const pen  = cumPenalty(f.id,ym);
-    const paid = cumPaid(f.id,ym);
-    const due  = bd+pen;
-    const bal  = Math.max(0,due-paid);
-    // Per-month data for inline editing (admin edits the selected month)
-    const c=getMD(ym).contributions[f.id];
-    const s=getStatus(f.id,ym);
-    const rCls=s==='danger'?'rw-danger':s==='warn'?'rw-warn':'';
-
-    const baseCell=isAdmin
-      ?`<input class="inline-inp" type="number" value="${c.baseDue}" onchange="inlineEdit('${f.id}','baseDue',this.value)" title="Edit ${monthLabel(ym)} base due">`
-      :`₹${bd}`;
-    const effPen=getEffectivePenalty(f.id,ym);
-    const penCell=isAdmin
-      ?`<input class="inline-inp" type="number" value="${effPen}" onchange="inlineEdit('${f.id}','penalty',this.value)" title="Edit ${monthLabel(ym)} penalty">`
-      :(pen>0?`<span style="color:#b02020;font-weight:600">₹${pen}</span>`:'—');
-    const paidCell=isAdmin
-      ?`<input class="inline-inp" type="number" value="${c.paid}" onchange="inlineEdit('${f.id}','paid',this.value)" title="Edit ${monthLabel(ym)} paid amount">`
-      :`<span style="color:#2d7a4f;font-weight:600">₹${paid}</span>`;
-
-    const hasOvr=!!c.statusOverride;
-    const statusCell=isAdmin
-      ?`<select class="inline-inp" style="width:118px;padding:3px 4px" onchange="inlineSt('${f.id}',this.value)">
-          <option value="auto" ${!hasOvr?'selected':''}>🔧 Auto</option>
-          <option value="ok"     ${s==='ok'&&hasOvr?'selected':''}>🔵 Pending</option>
-          <option value="warn"   ${s==='warn'&&hasOvr?'selected':''}>⚠ Due Soon</option>
-          <option value="danger" ${s==='danger'&&hasOvr?'selected':''}>🔴 Overdue</option>
-          <option value="paid"   ${s==='paid'?'selected':''}>✅ Paid</option>
-        </select>`
-      :`<span class="sb sb-${s}">${{ok:'🔵 Pending',warn:'⚠ Due Soon',danger:'🔴 Overdue',paid:'✅ Paid'}[s]||s}</span>`;
-
-    const act=isAdmin?`<td><div class="ca">
-      <button class="btn btn-t btn-xs" onclick="quickPay('${f.id}')">✓ Pay</button>
-      <button class="btn btn-amber btn-xs" onclick="openFlatEdit('${f.id}')">✏️</button>
-      <button class="btn btn-d btn-xs" onclick="resetOneFlat('${f.id}')" title="Reset to zero">🔄</button>
-    </div></td>`:'';
-
-    tb.innerHTML+=`<tr class="${rCls}">
-      <td><strong>${f.name}</strong></td><td>${f.floor}</td>
-      <td><span style="background:${f.bg};color:${f.color};padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600">${f.block}</span></td>
-      <td>${baseCell}</td><td>${penCell}</td>
-      <td><strong>₹${due}</strong></td>
-      <td>${paidCell}</td>
-      <td style="color:${bal>0?'#b02020':'#2d7a4f'};font-weight:600">${bal>0?'₹'+bal:'✓ Clear'}</td>
-      <td>${statusCell}</td>${act}
-    </tr>`;
+function renderFlatCards(){
+  var ym=TODAY_YM,g=document.getElementById('flats-grid');g.innerHTML='';
+  FLATS.forEach(function(f){
+    var bd=cumBaseDue(f.id,ym),pen=cumPenalty(f.id,ym),paid=cumPaid(f.id,ym);
+    var due=bd+pen,bal=Math.max(0,due-paid),pct=due>0?Math.min(100,Math.round(paid/due*100)):100;
+    var s=getStatus(f.id,ym);
+    var sM={paid:['sb-paid','\u2705 Paid','pf-paid','fc-paid'],warn:['sb-warn','\u26a0 Due Soon','pf-warn','fc-warn'],danger:['sb-danger','\ud83d\udd34 Overdue','pf-danger','fc-danger'],ok:['sb-ok','\ud83d\udd35 Pending','pf-ok','fc-ok']};
+    var sm=sM[s]||sM.ok;var isMe=!isAdmin&&f.id===currentUser;
+    // Can edit vehicle: members edit own flat, admin edits all
+    var canEditVeh=(isMe||isAdmin);
+    var vehHtml=renderVehicleInfo(f.id);
+    g.innerHTML+='<div class="fc '+sm[3]+'" style="'+(isMe?'box-shadow:0 0 0 3px '+f.color+';':'')+'">'
+      +'<div class="fc-top"><div class="fc-info"><div class="fc-av" style="background:'+f.bg+';color:'+f.color+'">\ud83c\udfe0</div>'
+      +'<div><div class="fc-nm">'+f.name+(isMe?' <span style="font-size:10px;background:'+f.color+';color:#fff;padding:1px 6px;border-radius:10px;vertical-align:middle">You</span>':'')+'</div>'
+      +'<div class="fc-fl">'+f.floor+' \u00b7 '+f.block+'</div></div></div>'
+      +'<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">'
+      +'<div class="sb '+sm[0]+'">'+sm[1]+'</div>'
+      +(canEditVeh?'<button class="btn btn-ghost" style="font-size:11px;padding:2px 8px;margin-top:2px" onclick="openVehicleModal(\''+f.id+'\')">'+(isMe?'&#128221; My Details':'&#9999; Edit')+'</button>':'')
+      +'</div></div>'
+      +(pen>0?'<div class="pen-tag">\u26a0 Penalty: \u20b9'+pen+'</div>':'')
+      +'<div class="pw"><div class="pl"><span>'+pct+'% paid</span><span>\u20b9'+paid+' / \u20b9'+due+'</span></div>'
+      +'<div class="pb"><div class="pf '+sm[2]+'" style="width:'+pct+'%"></div></div></div>'
+      +'<div class="fa"><div class="fai"><div class="fai-l">Base Due</div><div class="fai-v">\u20b9'+bd+'</div></div>'
+      +'<div class="fai"><div class="fai-l">Penalty</div><div class="fai-v" style="color:'+(pen>0?'#b02020':'#aaa')+'">'+(pen>0?'\u20b9'+pen:'\u2014')+'</div></div>'
+      +'<div class="fai"><div class="fai-l">Paid</div><div class="fai-v" style="color:#2d7a4f">\u20b9'+paid+'</div></div>'
+      +'<div class="fai"><div class="fai-l">Balance</div><div class="fai-v" style="color:'+(bal>0?'#b02020':'#2d7a4f')+'">'+(bal>0?'\u20b9'+bal:'Clear \u2713')+'</div></div></div>'
+      +vehHtml
+      +'<div style="margin-top:8px;font-size:10px;color:var(--ink-mu);text-align:center;padding:4px 8px;background:var(--cream-dk);border-radius:6px">\ud83d\udcca Cumulative: Oct 2025 \u2013 '+monthLabel(ym)+'</div>'
+      +'</div>';
   });
-  if(!isAdmin&&currentUser) renderMemberHistory(ym);
+}
+
+function renderContribTable(){
+  var ym=displayMonth(),tb=document.getElementById('ct-body');tb.innerHTML='';
+  if(viewMonth>TODAY_YM){tb.innerHTML='<tr><td colspan="10" style="padding:14px 18px;background:var(--amber-lt);color:var(--amber);font-size:13px;border-radius:8px">\ud83d\udcc5 Viewing '+monthLabel(viewMonth)+' \u2014 showing '+monthLabel(TODAY_YM)+' data until 1st '+monthLabel(viewMonth)+' arrives.</td></tr>';}
+  var notice=document.getElementById('ct-my-flat-notice');
+  if(!isAdmin&&notice){
+    var fObj=FLATS.find(function(f){return f.id===currentUser;});
+    notice.classList.remove('hidden');
+    notice.innerHTML='<div style="background:linear-gradient(135deg,'+(fObj?fObj.bg:'#e0f4f4')+',rgba(255,255,255,.5));border:1px solid '+(fObj?fObj.color+'33':'rgba(13,115,119,.2)')+';border-radius:var(--rsm);padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px"><span style="font-size:22px">'+(fObj?'\ud83c\udfe0':'\ud83c\udfe0')+'</span><div><div style="font-size:14px;font-weight:600;color:var(--ink)">'+(fObj?fObj.name+' \u00b7 '+fObj.floor:'Your Flat')+'</div><div style="font-size:12px;color:var(--ink-mu)">Cumulative contributions up to '+monthLabel(ym)+'</div></div></div>';
+  }else if(notice){notice.classList.add('hidden');}
+  var flats=isAdmin?FLATS:FLATS.filter(function(f){return f.id===currentUser;});
+  flats.forEach(function(f){
+    var bd=cumBaseDue(f.id,ym),pen=cumPenalty(f.id,ym),paid=cumPaid(f.id,ym),due=bd+pen,bal=Math.max(0,due-paid);
+    var c=getMD(ym).contributions[f.id],s=getStatus(f.id,ym),rCls=s==='danger'?'rw-danger':s==='warn'?'rw-warn':'';
+    var effPen=getEffectivePenalty(f.id,ym),fid=f.id;
+    var baseCell,penCell,paidCell,statusCell,act;
+    if(isAdmin){
+      baseCell='<input class="inline-inp" type="number" value="'+c.baseDue+'" onchange="inlineEdit(\''+fid+'\',\'baseDue\',this.value)">';
+      penCell='<input class="inline-inp" type="number" value="'+effPen+'" onchange="inlineEdit(\''+fid+'\',\'penalty\',this.value)">';
+      paidCell='<input class="inline-inp" type="number" value="'+c.paid+'" onchange="inlineEdit(\''+fid+'\',\'paid\',this.value)">';
+      var hasOvr=!!c.statusOverride;
+      statusCell='<select class="inline-inp" style="width:118px;padding:3px 4px" onchange="inlineSt(\''+fid+'\',this.value)">'
+        +'<option value="auto"'+(!hasOvr?' selected':'')+'>🔧 Auto</option>'
+        +'<option value="ok"'+(s==='ok'&&hasOvr?' selected':'')+'>🔵 Pending</option>'
+        +'<option value="warn"'+(s==='warn'&&hasOvr?' selected':'')+'>⚠ Due Soon</option>'
+        +'<option value="danger"'+(s==='danger'&&hasOvr?' selected':'')+'>🔴 Overdue</option>'
+        +'<option value="paid"'+(s==='paid'?' selected':'')+'>✅ Paid</option></select>';
+      act='<td><div class="ca"><button class="btn btn-t btn-xs" onclick="quickPay(\''+fid+'\')">✓ Pay</button><button class="btn btn-amber btn-xs" onclick="openFlatEdit(\''+fid+'\')">✏️</button><button class="btn btn-d btn-xs" onclick="resetOneFlat(\''+fid+'\')">🔄</button></div></td>';
+    }else{
+      baseCell='\u20b9'+bd;penCell=pen>0?'<span style="color:#b02020;font-weight:600">\u20b9'+pen+'</span>':'\u2014';
+      paidCell='<span style="color:#2d7a4f;font-weight:600">\u20b9'+paid+'</span>';
+      statusCell='<span class="sb sb-'+s+'">'+(s==='paid'?'✅ Paid':s==='warn'?'⚠ Due Soon':s==='danger'?'🔴 Overdue':'🔵 Pending')+'</span>';act='';
+    }
+    tb.innerHTML+='<tr class="'+rCls+'"><td><strong>'+f.name+'</strong></td><td>'+f.floor+'</td>'
+      +'<td><span style="background:'+f.bg+';color:'+f.color+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600">'+f.block+'</span></td>'
+      +'<td>'+baseCell+'</td><td>'+penCell+'</td><td><strong>\u20b9'+due+'</strong></td>'
+      +'<td>'+paidCell+'</td><td style="color:'+(bal>0?'#b02020':'#2d7a4f')+';font-weight:600">'+(bal>0?'\u20b9'+bal:'\u2713 Clear')+'</td>'
+      +'<td>'+statusCell+'</td>'+act+'</tr>';
+  });
+  if(!isAdmin&&currentUser)renderMemberHistory(ym);
 }
 
 function inlineEdit(fid,field,val){
-  const v=parseFloat(val)||0;
-  if(v<0){ toast('⚠ Cannot be negative'); return; }
-  getMD(viewMonth).contributions[fid][field]=v;
-  saveSt(); renderContribTable(); renderStats(); renderFlatCards();
+  var v=parseFloat(val)||0;if(v<0){toast('\u26a0 Cannot be negative');return;}
+  var c=getMD(viewMonth).contributions[fid];c[field]=v;
+  if(field==='paid')syncPayments(fid,viewMonth,v);
+  saveSt();renderContribTable();renderStats();renderFlatCards();
 }
 function inlineSt(fid,ns){
-  const c=getMD(viewMonth).contributions[fid];
-  if(ns==='auto') delete c.statusOverride;
-  else if(ns==='paid'){ c.paid=flatDue(fid,viewMonth); delete c.statusOverride; }
-  else c.statusOverride=ns;
-  saveSt(); renderContribTable(); renderStats(); renderFlatCards();
-  toast('✅ Status updated');
+  var c=getMD(viewMonth).contributions[fid];
+  if(ns==='auto'){delete c.statusOverride;}
+  else if(ns==='paid'){var fd=flatDue(fid,viewMonth);c.paid=fd;delete c.statusOverride;syncPayments(fid,viewMonth,fd);}
+  else{c.statusOverride=ns;}
+  saveSt();renderContribTable();renderStats();renderFlatCards();toast('\u2705 Status updated');
 }
 
-// ── MEMBER HISTORY (transaction log below contributions table) ──
 function renderMemberHistory(ym){
-  const fid=currentUser; if(!fid||fid==='admin') return;
-  const f=FLATS.find(x=>x.id===fid);
-  const existing=document.getElementById('member-history-section'); if(existing) existing.remove();
-  const sec=document.createElement('div'); sec.id='member-history-section'; sec.style.marginTop='22px';
-
-  // Build cumulative transaction list across all months up to ym
-  const txns=[];
-  let cur=NAV_START;
+  var fid=currentUser;if(!fid||fid==='admin')return;
+  var existing=document.getElementById('member-history-section');if(existing)existing.remove();
+  var sec=document.createElement('div');sec.id='member-history-section';sec.style.marginTop='22px';
+  var txns=[],cur=NAV_START;
   while(cur<=ym){
-    const mc=allData[cur]?.contributions[fid];
+    var mc=allData[cur]&&allData[cur].contributions[fid];
     if(mc){
-      if(mc.baseDue>0) txns.push({date:ord(cfg.startDay)+' '+monthLabel(cur),type:'debit',label:'Contribution Due — '+monthLabel(cur),amount:mc.baseDue,icon:'📋'});
-      if(mc.penalty>0) txns.push({date:'After '+ord(cfg.penaltyDay)+' '+monthLabel(cur),type:'debit',label:'Penalty — '+monthLabel(cur),amount:mc.penalty,icon:'⚠️'});
-      if(mc.payments?.length){
-        mc.payments.forEach(p=>{
-          const pd=p.date?new Date(p.date+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):monthLabel(cur);
-          txns.push({date:pd,type:'credit',label:'Payment — '+monthLabel(cur),amount:p.amt,icon:'✅'});
-        });
-      } else if(mc.paid>0 && (!mc.payments||!mc.payments.length)){
-        txns.push({date:monthLabel(cur),type:'credit',label:'Payment — '+monthLabel(cur),amount:mc.paid,icon:'✅'});
+      var ep=getEffectivePenalty(fid,cur);
+      if(mc.baseDue>0)txns.push({date:ord(cfg.startDay)+' '+monthLabel(cur),type:'debit',label:'Contribution Due \u2014 '+monthLabel(cur),amount:mc.baseDue,icon:'\ud83d\udccb'});
+      if((mc.arrears||0)>0)txns.push({date:'Carried forward',type:'debit',label:'Arrears Carried \u2014 '+monthLabel(cur),amount:mc.arrears,icon:'\u21a9'});
+      if(ep>0)txns.push({date:'After '+ord(cfg.penaltyDay)+' '+monthLabel(cur),type:'debit',label:'Penalty \u2014 '+monthLabel(cur),amount:ep,icon:'\u26a0'});
+      var ap=mc.paid||0;
+      if(ap>0){
+        var ps=(mc.payments||[]).reduce(function(s,p){return s+(p.amt||0);},0);
+        if(mc.payments&&mc.payments.length>0&&Math.abs(ps-ap)<0.01){mc.payments.forEach(function(p){var pd=p.date?new Date(p.date+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}):monthLabel(cur);txns.push({date:pd,type:'credit',label:'Payment \u2014 '+monthLabel(cur),amount:p.amt,icon:'\u2705'});});}
+        else{txns.push({date:monthLabel(cur),type:'credit',label:'Payment \u2014 '+monthLabel(cur),amount:ap,icon:'\u2705'});}
       }
     }
     cur=nextYM(cur);
   }
-
-  const bd=cumBaseDue(fid,ym), pen=cumPenalty(fid,ym), paid=cumPaid(fid,ym);
-  const due=bd+pen, bal=Math.max(0,due-paid);
-  const mLbl=monthLabel(ym);
-
-  sec.innerHTML=`
-    <div style="font-family:'DM Serif Display',serif;font-size:18px;color:var(--ink);margin-bottom:14px">📋 Your Statement — Up to ${mLbl}</div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:11px;margin-bottom:18px">
-      <div style="background:#fff;border-radius:var(--rsm);padding:14px;border:1px solid var(--border);text-align:center;box-shadow:var(--sh-sm)">
-        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-mu);margin-bottom:4px">Total Due</div>
-        <div style="font-size:22px;font-family:'DM Serif Display',serif;color:var(--danger)">₹${due}</div></div>
-      <div style="background:#fff;border-radius:var(--rsm);padding:14px;border:1px solid var(--border);text-align:center;box-shadow:var(--sh-sm)">
-        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-mu);margin-bottom:4px">Paid</div>
-        <div style="font-size:22px;font-family:'DM Serif Display',serif;color:var(--green)">₹${paid}</div></div>
-      <div style="background:#fff;border-radius:var(--rsm);padding:14px;border:1px solid var(--border);text-align:center;box-shadow:var(--sh-sm)">
-        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-mu);margin-bottom:4px">Balance</div>
-        <div style="font-size:22px;font-family:'DM Serif Display',serif;color:${bal>0?'var(--danger)':'var(--green)'}">${bal>0?'₹'+bal:'Clear ✓'}</div></div>
-      ${pen>0?`<div style="background:var(--danger-lt);border-radius:var(--rsm);padding:14px;border:1px solid rgba(176,32,32,.15);text-align:center">
-        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--danger);margin-bottom:4px">Penalty</div>
-        <div style="font-size:22px;font-family:'DM Serif Display',serif;color:var(--danger)">₹${pen}</div></div>`:''}
-    </div>
-    <div style="background:#fff;border-radius:var(--r);border:1px solid var(--border);overflow:hidden;box-shadow:var(--sh-sm)">
-      <div style="background:linear-gradient(135deg,#1a1a2e,#16213e);padding:12px 16px;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.7)">
-        📊 Transaction Details — Up to ${mLbl}
-      </div>
-      ${txns.length?txns.map((t,i)=>`
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid var(--cream-dk)${i===txns.length-1?';border-bottom:none':''}">
-          <div style="display:flex;align-items:center;gap:11px">
-            <div style="width:36px;height:36px;border-radius:10px;background:${t.type==='credit'?'var(--green-lt)':'var(--danger-lt)'};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${t.icon}</div>
-            <div><div style="font-size:14px;font-weight:500;color:var(--ink)">${t.label}</div>
-            <div style="font-size:12px;color:var(--ink-mu)">📅 ${t.date}</div></div>
-          </div>
-          <div style="font-family:'DM Serif Display',serif;font-size:18px;font-weight:700;color:${t.type==='credit'?'var(--green)':'var(--danger)'};white-space:nowrap;margin-left:12px">
-            ${t.type==='credit'?'+':'-'}₹${t.amount.toLocaleString('en-IN')}
-          </div>
-        </div>`).join('')
-      :'<div style="padding:22px;text-align:center;color:var(--ink-mu);font-size:13px">No transactions recorded yet.</div>'}
-      <div style="background:var(--cream-dk);padding:12px 16px;display:flex;justify-content:space-between;align-items:center">
-        <span style="font-size:13px;font-weight:600;color:var(--ink)">Running Balance</span>
-        <span style="font-family:'DM Serif Display',serif;font-size:18px;color:${bal>0?'var(--danger)':'var(--green)'}">
-          ${bal>0?'₹'+bal+' still due':'All clear ✓'}
-        </span>
-      </div>
-    </div>`;
-  const rb=document.getElementById('rules-box');
-  if(rb&&rb.parentNode) rb.parentNode.insertBefore(sec,rb.nextSibling);
+  var bd=cumBaseDue(fid,ym),pen=cumPenalty(fid,ym),paid=cumPaid(fid,ym),due=bd+pen,bal=Math.max(0,due-paid),mLbl=monthLabel(ym);
+  var html='<div style="font-family:\'DM Serif Display\',serif;font-size:18px;color:var(--ink);margin-bottom:14px">\ud83d\udccb Your Statement \u2014 Up to '+mLbl+'</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:11px;margin-bottom:18px">'
+    +'<div style="background:#fff;border-radius:var(--rsm);padding:14px;border:1px solid var(--border);text-align:center"><div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-mu);margin-bottom:4px">Total Due</div><div style="font-size:22px;font-family:\'DM Serif Display\',serif;color:var(--danger)">\u20b9'+due+'</div></div>'
+    +'<div style="background:#fff;border-radius:var(--rsm);padding:14px;border:1px solid var(--border);text-align:center"><div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-mu);margin-bottom:4px">Paid</div><div style="font-size:22px;font-family:\'DM Serif Display\',serif;color:var(--green)">\u20b9'+paid+'</div></div>'
+    +'<div style="background:#fff;border-radius:var(--rsm);padding:14px;border:1px solid var(--border);text-align:center"><div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-mu);margin-bottom:4px">Balance</div><div style="font-size:22px;font-family:\'DM Serif Display\',serif;color:'+(bal>0?'var(--danger)':'var(--green)')+'">'+( bal>0?'\u20b9'+bal:'Clear \u2713')+'</div></div>'
+    +(pen>0?'<div style="background:var(--danger-lt);border-radius:var(--rsm);padding:14px;border:1px solid rgba(176,32,32,.15);text-align:center"><div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--danger);margin-bottom:4px">Penalty</div><div style="font-size:22px;font-family:\'DM Serif Display\',serif;color:var(--danger)">\u20b9'+pen+'</div></div>':'')
+    +'</div><div style="background:#fff;border-radius:var(--r);border:1px solid var(--border);overflow:hidden;box-shadow:var(--sh-sm)">'
+    +'<div style="background:linear-gradient(135deg,#1a1a2e,#16213e);padding:12px 16px;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.7)">\ud83d\udcca Transaction Details \u2014 Up to '+mLbl+'</div>';
+  if(txns.length){txns.forEach(function(t,i){html+='<div style="display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid var(--cream-dk)'+(i===txns.length-1?';border-bottom:none':'')+'">'+'<div style="display:flex;align-items:center;gap:11px"><div style="width:36px;height:36px;border-radius:10px;background:'+(t.type==='credit'?'var(--green-lt)':'var(--danger-lt)')+';display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">'+t.icon+'</div><div><div style="font-size:14px;font-weight:500;color:var(--ink)">'+t.label+'</div><div style="font-size:12px;color:var(--ink-mu)">\ud83d\udcc5 '+t.date+'</div></div></div><div style="font-family:\'DM Serif Display\',serif;font-size:18px;font-weight:700;color:'+(t.type==='credit'?'var(--green)':'var(--danger)')+';white-space:nowrap;margin-left:12px">'+(t.type==='credit'?'+':'-')+'\u20b9'+t.amount.toLocaleString('en-IN')+'</div></div>';});}
+  else{html+='<div style="padding:22px;text-align:center;color:var(--ink-mu);font-size:13px">No transactions recorded yet.</div>';}
+  html+='<div style="background:var(--cream-dk);padding:12px 16px;display:flex;justify-content:space-between;align-items:center"><span style="font-size:13px;font-weight:600;color:var(--ink)">Running Balance</span><span style="font-family:\'DM Serif Display\',serif;font-size:18px;color:'+(bal>0?'var(--danger)':'var(--green)')+'">'+( bal>0?'\u20b9'+bal+' still due':'All clear \u2713')+'</span></div></div>';
+  sec.innerHTML=html;
+  var rb=document.getElementById('rules-box');if(rb&&rb.parentNode)rb.parentNode.insertBefore(sec,rb.nextSibling);
 }
 
-// ── RULES BOX ──
 function renderRulesBox(){
-  const cs=contribStartYM();
-  const cLabel=MONTHS[cfg.cycleStartMonth-1]+' '+cfg.cycleStartYear;
-  document.getElementById('rules-box').innerHTML=`<strong>📋 Contribution Rules</strong>
-    ✅ From <strong>${cLabel}</strong>: ₹<strong>${cfg.baseAmount}</strong> auto-due on <strong>${ord(cfg.startDay)}</strong> of every month<br>
-    🟡 After <strong>${ord(cfg.warnDay)}</strong>: Orange warning alert<br>
-    🔴 After <strong>${ord(cfg.penaltyDay)}</strong>: ₹<strong>${cfg.penaltyAmt}/day</strong> penalty (every ${cfg.compoundDays} day(s))<br>
-    📊 Unpaid balance carries to next month as arrears<br>
-    🔒 Only Admin can modify records`;
+  var cLabel=MONTHS[cfg.cycleStartMonth-1]+' '+cfg.cycleStartYear;
+  document.getElementById('rules-box').innerHTML='<strong>\ud83d\udccb Contribution Rules</strong><br>'
+    +'\u2705 From <strong>'+cLabel+'</strong>: \u20b9<strong>'+cfg.baseAmount+'</strong> due on <strong>'+ord(cfg.startDay)+'</strong> of every month<br>'
+    +'\ud83d\udfe1 After '+ord(cfg.warnDay)+': Warning | \ud83d\udd34 After '+ord(cfg.penaltyDay)+': \u20b9<strong>'+cfg.penaltyAmt+'/day</strong> penalty | \ud83d\udcca Unpaid carries as arrears';
 }
 
-// ── EXPENSES: future months show current month's data until that month starts
 function renderExpenses(){
-  const list=document.getElementById('exp-list');
-  const effYM=displayMonth();  // future months redirect to current month
-  const exps=expsForMonth(effYM);
-  if(!exps.length){
-    const futNote=viewMonth>TODAY_YM?' (showing '+monthLabel(TODAY_YM)+')':'';
-    list.innerHTML=`<div class="empty-st"><div style="font-size:40px;margin-bottom:8px">🧾</div>
-      <div style="font-size:15px;font-weight:500">No expenses for ${monthLabel(effYM)}${futNote}</div>
-      <div style="font-size:13px;margin-top:4px">${isAdmin&&viewMonth<=TODAY_YM?'Add expenses using the button above.':''}</div></div>`;
-    return;
-  }
-  const total=exps.reduce((s,e)=>s+e.amount,0);
-  let html=`<div style="background:linear-gradient(135deg,#fde8e8,#fde8e8cc);border:1px solid rgba(176,32,32,.15);border-radius:var(--rsm);padding:12px 17px;margin-bottom:15px;display:flex;justify-content:space-between;align-items:center">
-    <span style="font-size:14px;font-weight:600;color:var(--danger)">🧾 Total Expenses — ${monthLabel(effYM)}${viewMonth>TODAY_YM?' (current)':''}</span>
-    <span style="font-family:'DM Serif Display',serif;font-size:24px;color:var(--danger)">₹${total.toLocaleString('en-IN')}</span></div>`;
-  exps.forEach(e=>{
-    const ico=CAT_ICO[e.cat]||'📦', bg=CAT_BG[e.cat]||'#f0e8fa';
-    const ds=new Date(e.date+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
-    // Find which bucket it lives in
-    const srcYM=Object.keys(allData).find(k=>(allData[k].expenses||[]).some(x=>x.id===e.id))||viewMonth;
-    const btns=isAdmin?`<div style="display:flex;flex-direction:column;gap:4px;margin-left:10px;flex-shrink:0">
-      <button class="btn btn-amber btn-xs" onclick="openEditExp(${e.id},'${srcYM}')">✏️ Edit</button>
-      <button class="btn btn-d btn-xs" onclick="delExpense(${e.id},'${srcYM}')">🗑 Del</button></div>`:'';
-    html+=`<div class="ei"><div class="ei-ico" style="background:${bg}">${ico}</div>
-      <div class="ei-body"><div class="ei-title">${e.desc}</div>
-      <div class="ei-meta"><span>📅 ${ds}</span><span class="cchip" style="background:${bg};color:#444">${e.cat}</span>${e.notes?`<span>· ${e.notes}</span>`:''}</div></div>
-      <div class="ei-amt">-₹${e.amount.toLocaleString('en-IN')}</div>${btns}</div>`;
+  var list=document.getElementById('exp-list');
+  var effYM=displayMonth(),exps=expsForMonth(effYM);
+  if(!exps.length){var futNote=viewMonth>TODAY_YM?' (showing '+monthLabel(TODAY_YM)+')':'';list.innerHTML='<div class="empty-st"><div style="font-size:40px;margin-bottom:8px">\ud83e\udded</div><div style="font-size:15px;font-weight:500">No expenses for '+monthLabel(effYM)+futNote+'</div><div style="font-size:13px;margin-top:4px">'+(isAdmin&&viewMonth<=TODAY_YM?'Add expenses using the button above.':'')+'</div></div>';return;}
+  var total=exps.reduce(function(s,e){return s+e.amount;},0);
+  var html='<div style="background:linear-gradient(135deg,#fde8e8,#fde8e8cc);border:1px solid rgba(176,32,32,.15);border-radius:var(--rsm);padding:12px 17px;margin-bottom:15px;display:flex;justify-content:space-between;align-items:center"><span style="font-size:14px;font-weight:600;color:var(--danger)">\ud83e\udded Total Expenses \u2014 '+monthLabel(effYM)+(viewMonth>TODAY_YM?' (current)':'')+'</span><span style="font-family:\'DM Serif Display\',serif;font-size:24px;color:var(--danger)">\u20b9'+total.toLocaleString('en-IN')+'</span></div>';
+  exps.forEach(function(e){
+    var ico=CAT_ICO[e.cat]||'\ud83d\udce6',bg=CAT_BG[e.cat]||'#f0e8fa';
+    var ds=new Date(e.date+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+    var srcYM=Object.keys(allData).find(function(k){return (allData[k].expenses||[]).some(function(x){return x.id===e.id;});})||viewMonth;
+    var btns=isAdmin?'<div style="display:flex;flex-direction:column;gap:4px;margin-left:10px;flex-shrink:0"><button class="btn btn-amber btn-xs" onclick="openEditExp('+e.id+',\''+srcYM+'\')">✏️ Edit</button><button class="btn btn-d btn-xs" onclick="delExpense('+e.id+',\''+srcYM+'\')">🗑 Del</button></div>':'';
+    html+='<div class="ei"><div class="ei-ico" style="background:'+bg+'">'+ico+'</div><div class="ei-body"><div class="ei-title">'+e.desc+'</div><div class="ei-meta"><span>\ud83d\udcc5 '+ds+'</span><span class="cchip" style="background:'+bg+';color:#444">'+e.cat+'</span>'+(e.notes?'<span>\u00b7 '+e.notes+'</span>':'')+'</div></div><div class="ei-amt">-\u20b9'+e.amount.toLocaleString('en-IN')+'</div>'+btns+'</div>';
   });
   list.innerHTML=html;
 }
 
-// ── PAY PAGE ──
 function renderPayPage(){
-  ['qr-amt','pi-amt','how-amt'].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent=(id==='pi-amt'?'₹':'')+cfg.baseAmount; });
-  document.getElementById('pi-soc').textContent=cfg.socName||'Society 406';
-  document.getElementById('pi-upi').textContent=cfg.upiId||'—';
-  document.getElementById('pi-acn').textContent=cfg.acName||'—';
-  document.getElementById('pi-due').textContent=ord(cfg.penaltyDay)+' of every month';
-  const qi=document.getElementById('qimg'), qp=document.getElementById('qph'), nq=document.getElementById('no-qr-note');
-  if(cfg.qrData){ qi.src=cfg.qrData; qi.style.display='block'; qp.style.display='none'; nq.style.display='none'; }
-  else{ qi.style.display='none'; qp.style.display='block'; nq.style.display='block'; }
+  ['qr-amt','pi-amt','how-amt'].forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=(id==='pi-amt'?'\u20b9':'')+cfg.baseAmount;});
+  document.getElementById('pi-soc').textContent=cfg.socName||'Society 406';document.getElementById('pi-upi').textContent=cfg.upiId||'\u2014';
+  document.getElementById('pi-acn').textContent=cfg.acName||'\u2014';document.getElementById('pi-due').textContent=ord(cfg.penaltyDay)+' of every month';
+  var qi=document.getElementById('qimg'),qp=document.getElementById('qph'),nq=document.getElementById('no-qr-note');
+  if(cfg.qrData){qi.src=cfg.qrData;qi.style.display='block';qp.style.display='none';nq.style.display='none';}
+  else{qi.style.display='none';qp.style.display='block';nq.style.display='block';}
 }
 
-// ── TABS ──
 function showTab(name){
-  ['overview','contrib','expenses','pay','admin','settings'].forEach(t=>{
+  ['overview','contrib','expenses','pay','admin','settings'].forEach(function(t){
     document.getElementById('page-'+t).classList.toggle('active',t===name);
-    const tb=document.getElementById('tab-'+t); if(tb) tb.classList.toggle('active',t===name);
+    var tb=document.getElementById('tab-'+t);if(tb)tb.classList.toggle('active',t===name);
   });
-  if(name==='settings') loadCfgForm();
+  if(name==='settings')loadCfgForm();
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  ADMIN ACTIONS
-// ═══════════════════════════════════════════════════════════════
+// ── ADMIN ──
 function populateAdmSelects(){
-  const opts=FLATS.map(f=>`<option value="${f.id}">${f.name} · ${f.floor}</option>`).join('');
-  ['pay-flat','pen-flat','edit-flat-sel'].forEach(id=>{ const el=document.getElementById(id); if(el) el.innerHTML='<option value="">— Select Flat —</option>'+opts; });
+  var opts=FLATS.map(function(f){return '<option value="'+f.id+'">'+f.name+' \u00b7 '+f.floor+'</option>';}).join('');
+  ['pay-flat','pen-flat','edit-flat-sel'].forEach(function(id){var el=document.getElementById(id);if(el)el.innerHTML='<option value="">\u2014 Select Flat \u2014</option>'+opts;});
   document.getElementById('pay-date').value=TODAY.toISOString().split('T')[0];
 }
-
 function recPayment(){
-  const fid=document.getElementById('pay-flat').value;
-  const amt=parseFloat(document.getElementById('pay-amt').value);
-  const date=document.getElementById('pay-date').value;
-  if(!fid){ toast('⚠ Select a flat'); return; }
-  if(!amt||amt<1){ toast('⚠ Enter valid amount'); return; }
-  const md=getMD(viewMonth);
-  const c=md.contributions[fid];
-  // CRITICAL FIX: freeze the live penalty at the exact moment of payment.
-  // Without this, penalty keeps growing in getEffectivePenalty even after full payment.
-  const effPen=getEffectivePenalty(fid,viewMonth);
-  if(effPen>(c.penalty||0)) c.penalty=effPen;
-  c.paid+=amt;
-  if(!c.payments) c.payments=[];
-  c.payments.push({amt,date:date||TODAY.toISOString().split('T')[0]});
-  document.getElementById('pay-amt').value='';
-  saveSt(); renderAll(); toast('✅ Payment ₹'+amt+' recorded!');
+  var fid=document.getElementById('pay-flat').value,amt=parseFloat(document.getElementById('pay-amt').value),date=document.getElementById('pay-date').value;
+  if(!fid){toast('\u26a0 Select a flat');return;}if(!amt||amt<1){toast('\u26a0 Enter valid amount');return;}
+  var c=getMD(viewMonth).contributions[fid];var ep=getEffectivePenalty(fid,viewMonth);if(ep>(c.penalty||0))c.penalty=ep;
+  c.paid+=amt;if(!c.payments)c.payments=[];c.payments.push({amt:amt,date:date||TODAY.toISOString().split('T')[0]});
+  document.getElementById('pay-amt').value='';saveSt();renderAll();toast('\u2705 Payment \u20b9'+amt+' recorded!');
 }
-
 function quickPay(fid){
-  const bal=flatBal(fid,viewMonth);
-  if(bal===0){ toast('ℹ Already fully paid'); return; }
-  if(!confirm('Mark remaining ₹'+bal+' as paid for this flat?')) return;
-  const md=getMD(viewMonth);
-  const c=md.contributions[fid];
-  // Freeze live penalty before marking paid (same fix as recPayment)
-  const effPen=getEffectivePenalty(fid,viewMonth);
-  if(effPen>(c.penalty||0)) c.penalty=effPen;
-  c.paid+=bal;
-  if(!c.payments) c.payments=[];
-  c.payments.push({amt:bal,date:TODAY.toISOString().split('T')[0]});
-  saveSt(); renderAll(); toast('✅ Payment recorded!');
+  var bal=flatBal(fid,viewMonth);if(bal===0){toast('\u2139 Already fully paid');return;}
+  if(!confirm('Mark remaining \u20b9'+bal+' as paid?'))return;
+  var c=getMD(viewMonth).contributions[fid];var ep=getEffectivePenalty(fid,viewMonth);if(ep>(c.penalty||0))c.penalty=ep;
+  c.paid+=bal;if(!c.payments)c.payments=[];c.payments.push({amt:bal,date:TODAY.toISOString().split('T')[0]});
+  saveSt();renderAll();toast('\u2705 Payment recorded!');
 }
-
 function applyPenalty(){
-  const fid=document.getElementById('pen-flat').value;
-  const amt=parseFloat(document.getElementById('pen-amt').value);
-  if(!fid){ toast('⚠ Select a flat'); return; }
-  if(!amt||amt<1){ toast('⚠ Enter penalty amount'); return; }
-  getMD(viewMonth).contributions[fid].penalty+=amt;
-  document.getElementById('pen-amt').value='';
-  saveSt(); renderAll(); toast('⚠ Penalty ₹'+amt+' applied');
+  var fid=document.getElementById('pen-flat').value,amt=parseFloat(document.getElementById('pen-amt').value);
+  if(!fid){toast('\u26a0 Select flat');return;}if(!amt||amt<1){toast('\u26a0 Enter amount');return;}
+  getMD(viewMonth).contributions[fid].penalty+=amt;document.getElementById('pen-amt').value='';
+  saveSt();renderAll();toast('\u26a0 Penalty \u20b9'+amt+' applied');
 }
-
-function doRollover(manual=true,fromYM=null){
-  const srcYM=fromYM||viewMonth;
-  if(manual&&!confirm('Start new month cycle from '+monthLabel(srcYM)+'?\nUnpaid balances carry as arrears.')) return;
-  const nxtYM=nextYM(srcYM);
-  const src=getMD(srcYM);
-  allData[nxtYM]={contributions:{},expenses:[]};
-  FLATS.forEach(f=>{
-    const carry=Math.max(0,flatDue(f.id,srcYM)-src.contributions[f.id].paid);
-    allData[nxtYM].contributions[f.id]={baseDue:autoBaseDue(nxtYM),paid:0,penalty:0,arrears:carry,payments:[]};
-  });
-  if(manual){ viewMonth=nxtYM; saveSt(); renderAll(); toast('🔄 New cycle started for '+monthLabel(nxtYM)+'!'); }
-  else { saveSt(); }
+function doRollover(manual){
+  if(manual===undefined)manual=true;var srcYM=viewMonth;if(manual&&!confirm('Start new month cycle?'))return;
+  var nxtYM=nextYM(srcYM),src=getMD(srcYM);allData[nxtYM]={contributions:{},expenses:[]};
+  FLATS.forEach(function(f){var carry=Math.max(0,flatDue(f.id,srcYM)-src.contributions[f.id].paid);allData[nxtYM].contributions[f.id]={baseDue:autoBaseDue(nxtYM),paid:0,penalty:0,arrears:carry,payments:[]};});
+  if(manual){viewMonth=nxtYM;saveSt();renderAll();toast('\ud83d\udd04 New cycle: '+monthLabel(nxtYM)+'!');}else{saveSt();}
 }
-
 function changePin(){
-  const cur=document.getElementById('cur-pin').value;
-  const np=document.getElementById('new-pin').value;
-  const cp=document.getElementById('conf-pin').value;
-  if(cur!==adminPin){ toast('❌ Current PIN incorrect'); return; }
-  if(!np||np.length<4){ toast('⚠ PIN must be ≥ 4 digits'); return; }
-  if(np!==cp){ toast('⚠ PINs do not match'); return; }
-  adminPin=np;
-  ['cur-pin','new-pin','conf-pin'].forEach(i=>document.getElementById(i).value='');
-  saveSt(); toast('🔑 Admin PIN updated!');
+  var cur=document.getElementById('cur-pin').value,np=document.getElementById('new-pin').value,cp=document.getElementById('conf-pin').value;
+  if(cur!==adminPin){toast('\u274c Current PIN incorrect');return;}if(!np||np.length<4){toast('\u26a0 PIN \u2265 4 digits');return;}if(np!==cp){toast('\u26a0 PINs do not match');return;}
+  adminPin=np;['cur-pin','new-pin','conf-pin'].forEach(function(i){document.getElementById(i).value='';});saveSt();toast('\ud83d\udd11 PIN updated!');
 }
-
-// ── RESET ALL FLATS: deletes ALL contribution + payment data across ALL months ──
 function resetAllFlats(){
-  if(!confirm('RESET ALL FLATS TO ZERO?\n\nThis will DELETE ALL contribution, payment, and penalty data for ALL flats across ALL months.\n\nExpenses will NOT be deleted.\n\nThis CANNOT be undone.')) return;
-  // Wipe contribution data from every stored month
-  Object.keys(allData).forEach(ym=>{
-    allData[ym].contributions={};
-    // Expenses are preserved
-  });
-  saveSt(); renderAll();
-  toast('🔄 All flat data reset to zero across all months!');
+  if(!confirm('RESET ALL FLATS TO ZERO?\n\nDeletes ALL contribution and payment data.'))return;
+  Object.keys(allData).forEach(function(ym){allData[ym].contributions={};});saveSt();renderAll();toast('\ud83d\udd04 All flat data reset!');
 }
-
 function resetOneFlat(fid){
-  const f=FLATS.find(x=>x.id===fid);
-  if(!confirm('Reset '+f.name+' '+f.floor+' for '+monthLabel(viewMonth)+' to zero?')) return;
-  getMD(viewMonth).contributions[fid]={baseDue:0,paid:0,penalty:0,arrears:0,payments:[]};
-  saveSt(); renderAll(); toast('🔄 Flat reset!');
+  var f=FLATS.find(function(x){return x.id===fid;});if(!confirm('Reset '+f.name+' '+f.floor+' to zero?'))return;
+  getMD(viewMonth).contributions[fid]={baseDue:0,paid:0,penalty:0,arrears:0,payments:[]};saveSt();renderAll();toast('\ud83d\udd04 Flat reset!');
 }
-
 function deleteAllExpenses(){
-  if(!confirm('Delete ALL expenses for '+monthLabel(viewMonth)+'? Cannot be undone.')) return;
-  const toDelete=expsForMonth(viewMonth).map(e=>e.id);
-  Object.keys(allData).forEach(ym=>{
-    if(allData[ym].expenses) allData[ym].expenses=allData[ym].expenses.filter(e=>!toDelete.includes(e.id));
-  });
-  saveSt(); renderAll(); toast('🗑 All expenses deleted for '+monthLabel(viewMonth)+'!');
+  if(!confirm('Delete all expenses for '+monthLabel(viewMonth)+'?'))return;
+  var ids=new Set(expsForMonth(viewMonth).map(function(e){return e.id;}));
+  Object.keys(allData).forEach(function(ym){if(allData[ym].expenses)allData[ym].expenses=allData[ym].expenses.filter(function(e){return !ids.has(e.id);});});
+  saveSt();renderAll();toast('\ud83d\uddd1 Expenses deleted!');
 }
-
-// ── FLAT EDIT MODAL ──
-let editFlatId=null;
+var editFlatId=null;
 function openFlatEdit(fid){
-  editFlatId=fid;
-  const f=FLATS.find(x=>x.id===fid), c=getMD(viewMonth).contributions[fid];
-  document.getElementById('fem-title').textContent='✏️ Edit — '+f.name+' '+f.floor;
-  document.getElementById('fem-sub').textContent=f.block+' · '+monthLabel(viewMonth);
-  document.getElementById('fem-base').value=c.baseDue;
-  document.getElementById('fem-paid').value=c.paid;
-  document.getElementById('fem-pen').value=c.penalty;
-  document.getElementById('fem-arr').value=c.arrears;
+  editFlatId=fid;var f=FLATS.find(function(x){return x.id===fid;}),c=getMD(viewMonth).contributions[fid];
+  document.getElementById('fem-title').textContent='\u270f\ufe0f Edit \u2014 '+f.name+' '+f.floor;
+  document.getElementById('fem-sub').textContent=f.block+' \u00b7 '+monthLabel(viewMonth);
+  document.getElementById('fem-base').value=c.baseDue;document.getElementById('fem-paid').value=c.paid;
+  document.getElementById('fem-pen').value=c.penalty;document.getElementById('fem-arr').value=c.arrears;
   document.getElementById('flat-edit-modal').classList.remove('hidden');
 }
-function openFlatEditFromSel(){
-  const fid=document.getElementById('edit-flat-sel').value;
-  if(!fid){ toast('⚠ Select a flat first'); return; }
-  openFlatEdit(fid);
-}
-function closeFlatEdit(){ document.getElementById('flat-edit-modal').classList.add('hidden'); editFlatId=null; }
+function openFlatEditFromSel(){var fid=document.getElementById('edit-flat-sel').value;if(!fid){toast('\u26a0 Select a flat');return;}openFlatEdit(fid);}
+function closeFlatEdit(){document.getElementById('flat-edit-modal').classList.add('hidden');editFlatId=null;}
 function saveFlatEdit(){
-  if(!editFlatId) return;
-  const base=parseFloat(document.getElementById('fem-base').value)||0;
-  const paid=parseFloat(document.getElementById('fem-paid').value)||0;
-  const pen =parseFloat(document.getElementById('fem-pen').value)||0;
-  const arr =parseFloat(document.getElementById('fem-arr').value)||0;
-  if(base<0||paid<0||pen<0||arr<0){ toast('⚠ Values cannot be negative'); return; }
-  getMD(viewMonth).contributions[editFlatId]={baseDue:base,paid,penalty:pen,arrears:arr,payments:getMD(viewMonth).contributions[editFlatId].payments||[]};
-  closeFlatEdit(); saveSt(); renderAll(); toast('✅ Flat record updated!');
+  if(!editFlatId)return;
+  var base=parseFloat(document.getElementById('fem-base').value)||0,paid=parseFloat(document.getElementById('fem-paid').value)||0;
+  var pen=parseFloat(document.getElementById('fem-pen').value)||0,arr=parseFloat(document.getElementById('fem-arr').value)||0;
+  if(base<0||paid<0||pen<0||arr<0){toast('\u26a0 No negative values');return;}
+  var oldPaid=getMD(viewMonth).contributions[editFlatId].paid||0;
+  getMD(viewMonth).contributions[editFlatId]={baseDue:base,paid:paid,penalty:pen,arrears:arr,payments:getMD(viewMonth).contributions[editFlatId].payments||[]};
+  if(paid!==oldPaid)syncPayments(editFlatId,viewMonth,paid);
+  closeFlatEdit();saveSt();renderAll();toast('\u2705 Updated!');
 }
 function resetFlatZero(){
-  if(!editFlatId) return;
-  const f=FLATS.find(x=>x.id===editFlatId);
-  if(!confirm('Reset ALL amounts for '+f.name+' '+f.floor+' in '+monthLabel(viewMonth)+' to zero?')) return;
-  getMD(viewMonth).contributions[editFlatId]={baseDue:0,paid:0,penalty:0,arrears:0,payments:[]};
-  closeFlatEdit(); saveSt(); renderAll(); toast('🔄 Flat reset to zero!');
+  if(!editFlatId)return;if(!confirm('Reset to zero?'))return;
+  getMD(viewMonth).contributions[editFlatId]={baseDue:0,paid:0,penalty:0,arrears:0,payments:[]};closeFlatEdit();saveSt();renderAll();toast('\ud83d\udd04 Reset!');
 }
-
-// ── EXPENSES CRUD ──
-function openAddExp(){
-  document.getElementById('ae-date').value=TODAY.toISOString().split('T')[0];
-  document.getElementById('add-exp-modal').classList.remove('hidden');
-}
-function closeAddExp(){ document.getElementById('add-exp-modal').classList.add('hidden'); }
+function openAddExp(){document.getElementById('ae-date').value=TODAY.toISOString().split('T')[0];document.getElementById('add-exp-modal').classList.remove('hidden');}
+function closeAddExp(){document.getElementById('add-exp-modal').classList.add('hidden');}
 function addExpense(){
-  const desc=document.getElementById('ae-desc').value.trim();
-  const amt=parseFloat(document.getElementById('ae-amt').value);
-  const cat=document.getElementById('ae-cat').value;
-  const date=document.getElementById('ae-date').value;
-  const notes=document.getElementById('ae-notes').value.trim();
-  if(!desc){ toast('⚠ Enter description'); return; }
-  if(!amt||amt<1){ toast('⚠ Enter valid amount'); return; }
-  if(!date){ toast('⚠ Enter date'); return; }
-  const expYM=date.substring(0,7);
-  ensureMonth(expYM);
-  allData[expYM].expenses.push({id:Date.now(),desc,amount:amt,cat,date,notes});
-  closeAddExp();
-  ['ae-desc','ae-amt','ae-notes'].forEach(i=>document.getElementById(i).value='');
-  viewMonth=expYM;  // switch view to expense's month so user sees it
-  saveSt(); renderAll(); toast('✅ Expense added for '+monthLabel(expYM)+'!');
+  var desc=document.getElementById('ae-desc').value.trim(),amt=parseFloat(document.getElementById('ae-amt').value);
+  var cat=document.getElementById('ae-cat').value,date=document.getElementById('ae-date').value,notes=document.getElementById('ae-notes').value.trim();
+  if(!desc){toast('\u26a0 Enter description');return;}if(!amt||amt<1){toast('\u26a0 Enter valid amount');return;}if(!date){toast('\u26a0 Enter date');return;}
+  var expYM=date.substring(0,7);ensureMonth(expYM);allData[expYM].expenses.push({id:Date.now(),desc:desc,amount:amt,cat:cat,date:date,notes:notes});
+  closeAddExp();['ae-desc','ae-amt','ae-notes'].forEach(function(i){document.getElementById(i).value='';});
+  viewMonth=expYM;saveSt();renderAll();toast('\u2705 Expense added!');
 }
 function delExpense(id,srcYM){
-  if(!confirm('Delete this expense?')) return;
-  const ym=srcYM||viewMonth;
-  if(allData[ym]) allData[ym].expenses=allData[ym].expenses.filter(e=>e.id!==id);
-  saveSt(); renderAll(); toast('🗑 Expense deleted');
+  if(!confirm('Delete this expense?'))return;var ym=srcYM||viewMonth;
+  if(allData[ym])allData[ym].expenses=allData[ym].expenses.filter(function(e){return e.id!==id;});
+  saveSt();renderAll();toast('\ud83d\uddd1 Deleted');
 }
 function openEditExp(id,srcYM){
-  const ym=srcYM||viewMonth;
-  const e=(allData[ym]?.expenses||[]).find(x=>x.id===id);
-  if(!e){ toast('❌ Expense not found'); return; }
-  document.getElementById('ee-id').value=id;
-  document.getElementById('ee-id').dataset.srcYm=ym;
-  document.getElementById('ee-desc').value=e.desc;
-  document.getElementById('ee-amt').value=e.amount;
-  document.getElementById('ee-cat').value=e.cat;
-  document.getElementById('ee-date').value=e.date;
-  document.getElementById('ee-notes').value=e.notes||'';
+  var ym=srcYM||viewMonth,e=(allData[ym]&&allData[ym].expenses||[]).find(function(x){return x.id===id;});
+  if(!e){toast('\u274c Not found');return;}
+  document.getElementById('ee-id').value=id;document.getElementById('ee-id').dataset.srcYm=ym;
+  document.getElementById('ee-desc').value=e.desc;document.getElementById('ee-amt').value=e.amount;
+  document.getElementById('ee-cat').value=e.cat;document.getElementById('ee-date').value=e.date;document.getElementById('ee-notes').value=e.notes||'';
   document.getElementById('edit-exp-modal').classList.remove('hidden');
 }
-function closeEditExp(){ document.getElementById('edit-exp-modal').classList.add('hidden'); }
+function closeEditExp(){document.getElementById('edit-exp-modal').classList.add('hidden');}
 function saveEditExp(){
-  const id=parseInt(document.getElementById('ee-id').value);
-  const srcYM=document.getElementById('ee-id').dataset.srcYm||viewMonth;
-  const desc=document.getElementById('ee-desc').value.trim();
-  const amt=parseFloat(document.getElementById('ee-amt').value);
-  const cat=document.getElementById('ee-cat').value;
-  const date=document.getElementById('ee-date').value;
-  const notes=document.getElementById('ee-notes').value.trim();
-  if(!desc){ toast('⚠ Enter description'); return; }
-  if(!amt||amt<1){ toast('⚠ Enter valid amount'); return; }
-  const newYM=date.substring(0,7);
-  if(newYM!==srcYM){
-    if(allData[srcYM]) allData[srcYM].expenses=allData[srcYM].expenses.filter(e=>e.id!==id);
-    ensureMonth(newYM); allData[newYM].expenses.push({id,desc,amount:amt,cat,date,notes});
-    viewMonth=newYM; toast('✅ Expense moved to '+monthLabel(newYM)+'!');
-  } else {
-    const idx=(allData[srcYM]?.expenses||[]).findIndex(x=>x.id===id);
-    if(idx===-1){ toast('❌ Not found'); return; }
-    allData[srcYM].expenses[idx]={id,desc,amount:amt,cat,date,notes};
-    toast('✅ Expense updated!');
-  }
-  closeEditExp(); saveSt(); renderAll();
+  var id=parseInt(document.getElementById('ee-id').value),srcYM=document.getElementById('ee-id').dataset.srcYm||viewMonth;
+  var desc=document.getElementById('ee-desc').value.trim(),amt=parseFloat(document.getElementById('ee-amt').value);
+  var cat=document.getElementById('ee-cat').value,date=document.getElementById('ee-date').value,notes=document.getElementById('ee-notes').value.trim();
+  if(!desc){toast('\u26a0 Enter description');return;}if(!amt||amt<1){toast('\u26a0 Enter valid amount');return;}
+  var newYM=date.substring(0,7);
+  if(newYM!==srcYM){if(allData[srcYM])allData[srcYM].expenses=allData[srcYM].expenses.filter(function(e){return e.id!==id;});ensureMonth(newYM);allData[newYM].expenses.push({id:id,desc:desc,amount:amt,cat:cat,date:date,notes:notes});viewMonth=newYM;toast('\u2705 Expense moved!');}
+  else{var idx=(allData[srcYM]&&allData[srcYM].expenses||[]).findIndex(function(x){return x.id===id;});if(idx===-1){toast('\u274c Not found');return;}allData[srcYM].expenses[idx]={id:id,desc:desc,amount:amt,cat:cat,date:date,notes:notes};toast('\u2705 Expense updated!');}
+  closeEditExp();saveSt();renderAll();
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  SETTINGS
-// ═══════════════════════════════════════════════════════════════
+// ── SETTINGS ──
+function renderFlatNameEditors(){
+  var container=document.getElementById('flat-names-container');if(!container)return;
+  var html='';
+  FLATS.forEach(function(f){
+    html+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:center;margin-bottom:8px;padding:8px 10px;background:var(--cream-dk);border-radius:var(--rsm)">'
+      +'<input type="text" class="fi" style="font-size:13px" placeholder="Flat name" value="'+f.name.replace(/"/g,'&quot;')+'" id="fn-name-'+f.id+'">'
+      +'<input type="text" class="fi" style="font-size:13px" placeholder="Floor" value="'+f.floor.replace(/"/g,'&quot;')+'" id="fn-floor-'+f.id+'">'
+      +'<input type="text" class="fi" style="font-size:13px" placeholder="Block" value="'+f.block.replace(/"/g,'&quot;')+'" id="fn-block-'+f.id+'">'
+      +'<div style="font-size:18px;text-align:center">\ud83c\udfe0</div></div>';
+  });
+  container.innerHTML=html;
+}
+function saveFlatNames(){
+  if(!cfg.flatNames)cfg.flatNames={};
+  FLATS.forEach(function(f){
+    var nm=document.getElementById('fn-name-'+f.id),fl=document.getElementById('fn-floor-'+f.id),bl=document.getElementById('fn-block-'+f.id);if(!nm)return;
+    f.name=nm.value.trim()||f.name;f.floor=fl.value.trim()||f.floor;f.block=bl.value.trim()||f.block;
+    cfg.flatNames[f.id]={name:f.name,floor:f.floor,block:f.block};
+  });
+  refreshLoginDropdown();if(isAdmin)populateAdmSelects();
+}
 function loadCfgForm(){
-  const s=(id,v)=>{ const el=document.getElementById(id); if(el) el.value=v; };
-  s('cfg-base',cfg.baseAmount);
-  s('cfg-start-month',cfg.cycleStartMonth);  // "Contribution Start Month"
-  s('cfg-start-year', cfg.cycleStartYear);   // "Contribution Start Year"
-  s('cfg-start',cfg.startDay); s('cfg-warn',cfg.warnDay);
-  s('cfg-pday',cfg.penaltyDay); s('cfg-uday',cfg.updateDay);
-  s('cfg-pamt',cfg.penaltyAmt); s('cfg-cdays',cfg.compoundDays);
-  s('cfg-upi',cfg.upiId); s('cfg-acn',cfg.acName); s('cfg-soc',cfg.socName);
-  updateCfgPreview();
-  ['cfg-base','cfg-start-month','cfg-start-year','cfg-start','cfg-warn','cfg-pday','cfg-uday','cfg-pamt','cfg-cdays']
-    .forEach(id=>{ const el=document.getElementById(id); if(el) el.oninput=updateCfgPreview; });
+  function sv(id,v){var el=document.getElementById(id);if(el)el.value=v;}
+  sv('cfg-base',cfg.baseAmount);sv('cfg-start-month',cfg.cycleStartMonth);sv('cfg-start-year',cfg.cycleStartYear);
+  sv('cfg-start',cfg.startDay);sv('cfg-warn',cfg.warnDay);sv('cfg-pday',cfg.penaltyDay);sv('cfg-uday',cfg.updateDay);
+  sv('cfg-pamt',cfg.penaltyAmt);sv('cfg-cdays',cfg.compoundDays);sv('cfg-upi',cfg.upiId);sv('cfg-acn',cfg.acName);sv('cfg-soc',cfg.socName);
+  renderFlatNameEditors();loadCloudCfgForm();updateCfgPreview();
+  ['cfg-base','cfg-start-month','cfg-start-year','cfg-start','cfg-warn','cfg-pday','cfg-uday','cfg-pamt','cfg-cdays'].forEach(function(id){var el=document.getElementById(id);if(el)el.oninput=updateCfgPreview;});
   refreshQRPreview();
 }
-
+function loadCloudCfgForm(){
+  // Pre-fill with hardcoded config if available, otherwise use saved
+  var hc=window.HARDCODED_FB_CFG;
+  var prefill=(window.FB_AUTO_CONNECT&&hc&&hc.apiKey&&hc.apiKey!=='YOUR_API_KEY')?hc:getSavedFbCfg();
+  var saved=prefill;if(!saved)return;
+  ['apiKey','authDomain','projectId','storageBucket','messagingSenderId','appId'].forEach(function(k){var el=document.getElementById('fb-'+k);if(el&&saved[k])el.value=saved[k];});
+  if(cloudEnabled){var btn=document.getElementById('cloud-connect-btn');if(btn){btn.textContent='\u2601\ufe0f Connected \u2014 Reconnect';btn.style.background='var(--green)';}}
+}
 function updateCfgPreview(){
-  const gv=id=>parseInt(document.getElementById(id)?.value)||0;
-  const ba=gv('cfg-base')||cfg.baseAmount;
-  const cm=gv('cfg-start-month')||cfg.cycleStartMonth;
-  const cy=gv('cfg-start-year')||cfg.cycleStartYear;
-  const sd=gv('cfg-start')||cfg.startDay;
-  const wd=gv('cfg-warn')||cfg.warnDay;
-  const pd=gv('cfg-pday')||cfg.penaltyDay;
-  const ud=gv('cfg-uday')||cfg.updateDay;
-  const pa=gv('cfg-pamt')||cfg.penaltyAmt;
-  const cd=gv('cfg-cdays')||cfg.compoundDays;
-  const el=document.getElementById('cfg-prev');
-  if(el) el.innerHTML=`<strong>📋 Preview — How the cycle will work:</strong><br>
-    🗓 Navigation: <strong>Oct 2025 → present</strong> (fixed, never changes, no login risk)<br>
-    ✅ From <strong>${MONTHS[cm-1]} ${cy}</strong>: ₹<strong>${ba}</strong> auto-due on <strong>${ord(sd)}</strong> of every month<br>
-    🟡 After <strong>${ord(wd)}</strong> — Orange warning alert<br>
-    🔴 After <strong>${ord(pd)}</strong> — ₹<strong>${pa}</strong>/day penalty (every ${cd} day(s))<br>
-    🔄 On <strong>${ord(ud)}</strong> — New cycle auto-starts`;
+  function gv(id){var el=document.getElementById(id);return el?parseInt(el.value)||0:0;}
+  var ba=gv('cfg-base')||cfg.baseAmount,cm=gv('cfg-start-month')||cfg.cycleStartMonth,cy=gv('cfg-start-year')||cfg.cycleStartYear;
+  var sd=gv('cfg-start')||cfg.startDay,wd=gv('cfg-warn')||cfg.warnDay,pd=gv('cfg-pday')||cfg.penaltyDay;
+  var pa=gv('cfg-pamt')||cfg.penaltyAmt,cd=gv('cfg-cdays')||cfg.compoundDays,ud=gv('cfg-uday')||cfg.updateDay;
+  var el=document.getElementById('cfg-prev');
+  if(el)el.innerHTML='\u2705 From <strong>'+MONTHS[cm-1]+' '+cy+'</strong>: \u20b9<strong>'+ba+'</strong> due on '+ord(sd)+' | \ud83d\udfe1 Warning '+ord(wd)+' | \ud83d\udd34 Penalty \u20b9'+pa+'/day from '+ord(pd)+' | \ud83d\udd04 Reset '+ord(ud);
 }
-
 function saveSettings(){
-  const gi=id=>document.getElementById(id);
-  const gv=id=>parseInt(gi(id)?.value)||0;
-  const ba=gv('cfg-base');
-  const cm=gv('cfg-start-month'), cy=gv('cfg-start-year');
-  const sd=gv('cfg-start'), wd=gv('cfg-warn'), pd=gv('cfg-pday'), ud=gv('cfg-uday');
-  const pa=gv('cfg-pamt'), cd=gv('cfg-cdays');
-  const upi=gi('cfg-upi')?.value.trim()||'';
-  const acn=gi('cfg-acn')?.value.trim()||'';
-  const soc=gi('cfg-soc')?.value.trim()||'Society 406';
-
-  // Validate
-  if(!ba||ba<100){ toast('⚠ Min contribution ₹100'); return; }
-  if(!cm||cm<1||cm>12){ toast('⚠ Contribution month 1–12'); return; }
-  if(!cy||cy<2025||cy>2099){ toast('⚠ Enter valid year'); return; }
-  if(!sd||sd<1||sd>28){ toast('⚠ Start day 1–28'); return; }
-  if(!wd||wd<=sd){ toast('⚠ Warning day must be after start day'); return; }
-  if(!pd||pd<=wd){ toast('⚠ Penalty day must be after warning day'); return; }
-  if(!ud||ud<1||ud>28){ toast('⚠ Update day 1–28'); return; }
-  if(pa<0){ toast('⚠ Penalty ≥ 0'); return; }
-  if(!cd||cd<1){ toast('⚠ Compound days ≥ 1'); return; }
-
-  // ── CRITICAL FIX: Only update contribution/penalty logic.
-  // Do NOT change navigation start (NAV_START is hardcoded).
-  // This prevents the login loop completely. ──
-  cfg = {...cfg,
-    baseAmount:ba,
-    cycleStartMonth:cm, cycleStartYear:cy,
-    penaltyStartMonth:cm, penaltyStartYear:cy,
-    startDay:sd, warnDay:wd, penaltyDay:pd, updateDay:ud,
-    penaltyAmt:pa, compoundDays:cd,
-    upiId:upi, acName:acn, socName:soc
-  };
-
-  // Only update CURRENT and FUTURE months. Past months are NEVER modified.
-  const cs = contribStartYM();
-  Object.keys(allData).forEach(ym=>{
-    if(ym < TODAY_YM) return;  // skip past months entirely — preserve all historical data
-    FLATS.forEach(f=>{
-      if(allData[ym].contributions[f.id]){
-        allData[ym].contributions[f.id].baseDue = ym < cs ? 0 : ba;
-      }
-    });
-  });
-
-  // Keep viewMonth valid (don't go before NAV_START)
-  if(viewMonth < NAV_START) viewMonth = NAV_START;
-
-  saveSt();
-  // ── CRITICAL: never touch login-screen or app visibility here ──
-  try{ renderAll(); }catch(err){ console.error('renderAll after saveSettings:',err); }
-  toast('✅ Settings saved! Contribution ₹'+ba+' starts '+MONTHS[cm-1]+' '+cy+'.');
+  function gi(id){return document.getElementById(id);}function gv(id){return parseInt(gi(id)&&gi(id).value)||0;}
+  var ba=gv('cfg-base'),cm=gv('cfg-start-month'),cy=gv('cfg-start-year'),sd=gv('cfg-start'),wd=gv('cfg-warn'),pd=gv('cfg-pday'),ud=gv('cfg-uday'),pa=gv('cfg-pamt'),cd=gv('cfg-cdays');
+  var upi=gi('cfg-upi')&&gi('cfg-upi').value.trim()||'',acn=gi('cfg-acn')&&gi('cfg-acn').value.trim()||'',soc=gi('cfg-soc')&&gi('cfg-soc').value.trim()||'Society 406';
+  if(!ba||ba<100){toast('\u26a0 Min \u20b9100');return;}if(!cm||cm<1||cm>12){toast('\u26a0 Month 1-12');return;}if(!cy||cy<2025||cy>2099){toast('\u26a0 Valid year');return;}
+  if(!sd||sd<1||sd>28){toast('\u26a0 Start day 1-28');return;}if(!wd||wd<=sd){toast('\u26a0 Warning > start');return;}if(!pd||pd<=wd){toast('\u26a0 Penalty > warning');return;}
+  if(!ud||ud<1||ud>28){toast('\u26a0 Update day 1-28');return;}if(pa<0){toast('\u26a0 Penalty >= 0');return;}if(!cd||cd<1){toast('\u26a0 Compound >= 1');return;}
+  saveFlatNames();
+  cfg=Object.assign({},cfg,{baseAmount:ba,cycleStartMonth:cm,cycleStartYear:cy,penaltyStartMonth:cm,penaltyStartYear:cy,startDay:sd,warnDay:wd,penaltyDay:pd,updateDay:ud,penaltyAmt:pa,compoundDays:cd,upiId:upi,acName:acn,socName:soc});
+  var cs=contribStartYM();
+  Object.keys(allData).forEach(function(ym){if(ym<TODAY_YM)return;FLATS.forEach(function(f){if(allData[ym].contributions[f.id])allData[ym].contributions[f.id].baseDue=ym<cs?0:ba;});});
+  if(viewMonth<NAV_START)viewMonth=NAV_START;
+  saveSt();try{renderAll();}catch(e){console.error(e);}toast('\u2705 Settings saved and synced to all devices!');
 }
-
-function handleQR(event){
-  const file=event.target.files[0]; if(!file) return;
-  if(file.size>5*1024*1024){ toast('⚠ Max 5MB'); return; }
-  const reader=new FileReader();
-  reader.onload=e=>{ cfg.qrData=e.target.result; refreshQRPreview(); renderPayPage(); saveSt(); toast('✅ QR uploaded!'); };
-  reader.readAsDataURL(file);
+function connectCloud(){
+  // If hardcoded config is set and valid, use it directly
+  var hc=window.HARDCODED_FB_CFG;
+  if(window.FB_AUTO_CONNECT&&hc&&hc.apiKey&&hc.apiKey!=='YOUR_API_KEY'){
+    saveFbCfgLocal(hc);var ok=initCloud(hc);
+    if(ok)toast('☁️ Connected to Firebase!'); return;
+  }
+  // Otherwise read from Settings form inputs (original behavior):
+  var fbCfg={apiKey:document.getElementById('fb-apiKey').value.trim(),authDomain:document.getElementById('fb-authDomain').value.trim(),projectId:document.getElementById('fb-projectId').value.trim(),storageBucket:document.getElementById('fb-storageBucket').value.trim(),messagingSenderId:document.getElementById('fb-messagingSenderId').value.trim(),appId:document.getElementById('fb-appId').value.trim()};
+  if(!fbCfg.apiKey||!fbCfg.projectId){toast('\u26a0 Enter API Key and Project ID');return;}
+  saveFbCfgLocal(fbCfg);var ok=initCloud(fbCfg);
+  if(ok){toast('\u2705 Connected! All changes sync across all devices.');var btn=document.getElementById('cloud-connect-btn');if(btn){btn.textContent='\u2601\ufe0f Connected \u2014 Reconnect';btn.style.background='var(--green)';}}
 }
+function disconnectCloud(){
+  if(!confirm('Disconnect from cloud?'))return;if(cloudUnsub)cloudUnsub();db=null;cloudEnabled=false;
+  localStorage.removeItem(FB_KEY);setSyncBadge('off');toast('\ud83d\udcbe Disconnected. Saving locally.');
+  var btn=document.getElementById('cloud-connect-btn');if(btn){btn.textContent='Connect to Cloud';btn.style.background='';}
+}
+function handleQR(event){var file=event.target.files[0];if(!file)return;if(file.size>5*1024*1024){toast('\u26a0 Max 5MB');return;}var reader=new FileReader();reader.onload=function(e){cfg.qrData=e.target.result;refreshQRPreview();renderPayPage();saveSt();toast('\u2705 QR uploaded!');};reader.readAsDataURL(file);}
 function refreshQRPreview(){
-  const wrap=document.getElementById('qr-preview-wrap'), prev=document.getElementById('qr-preview');
-  if(cfg.qrData){
-    prev.src=cfg.qrData; wrap.style.display='block';
-    document.getElementById('qup-ico').textContent='✅';
-    document.getElementById('qup-txt').innerHTML='<strong style="color:var(--green)">QR uploaded!</strong><br><span style="font-size:12px;color:var(--ink-mu)">Click to replace</span>';
-  } else {
-    wrap.style.display='none';
-    document.getElementById('qup-ico').textContent='📷';
-    document.getElementById('qup-txt').innerHTML='<strong>Click to upload QR Code image</strong><br>JPG, PNG · Max 5MB';
-  }
+  var wrap=document.getElementById('qr-preview-wrap'),prev=document.getElementById('qr-preview');
+  if(cfg.qrData){prev.src=cfg.qrData;wrap.style.display='block';document.getElementById('qup-ico').textContent='\u2705';document.getElementById('qup-txt').innerHTML='<strong style="color:var(--green)">QR uploaded!</strong><br><span style="font-size:12px;color:var(--ink-mu)">Click to replace</span>';}
+  else{wrap.style.display='none';document.getElementById('qup-ico').textContent='\ud83d\udcf7';document.getElementById('qup-txt').innerHTML='<strong>Click to upload QR Code image</strong><br>JPG, PNG \u00b7 Max 5MB';}
 }
-function removeQR(){
-  if(!confirm('Remove QR code?')) return;
-  cfg.qrData=null; document.getElementById('qr-file').value='';
-  refreshQRPreview(); renderPayPage(); saveSt(); toast('🗑 QR removed');
-}
-function openQRLightbox(){
-  const lb=document.getElementById('qr-lightbox'); if(!lb) return;
-  const li=document.getElementById('lb-qimg'), lp=document.getElementById('lb-qph');
-  if(cfg.qrData){ li.src=cfg.qrData; li.style.display='block'; lp.style.display='none'; }
-  else { li.style.display='none'; lp.style.display='block'; }
-  const lu=document.getElementById('lb-upi'); if(lu) lu.textContent=cfg.upiId?'UPI: '+cfg.upiId:'';
-  const la=document.getElementById('lb-amt'); if(la) la.textContent=cfg.baseAmount?'₹'+cfg.baseAmount:'';
-  lb.style.display='flex';
-}
-function closeQRLightbox(){
-  const lb=document.getElementById('qr-lightbox'); if(lb) lb.style.display='none';
-}
+function removeQR(){if(!confirm('Remove QR?'))return;cfg.qrData=null;document.getElementById('qr-file').value='';refreshQRPreview();renderPayPage();saveSt();toast('\ud83d\uddd1 QR removed');}
+function openQRLightbox(){var lb=document.getElementById('qr-lightbox');if(!lb)return;var li=document.getElementById('lb-qimg'),lp=document.getElementById('lb-qph');if(cfg.qrData){li.src=cfg.qrData;li.style.display='block';lp.style.display='none';}else{li.style.display='none';lp.style.display='block';}var lu=document.getElementById('lb-upi');if(lu)lu.textContent=cfg.upiId?'UPI: '+cfg.upiId:'';var la=document.getElementById('lb-amt');if(la)la.textContent=cfg.baseAmount?'\u20b9'+cfg.baseAmount:'';lb.style.display='flex';}
+function closeQRLightbox(){var lb=document.getElementById('qr-lightbox');if(lb)lb.style.display='none';}
 
-// ── EXCEL DOWNLOAD — full month-wise breakdown from start to today ──
+// ── EXCEL DOWNLOAD (2 sheets with ExcelJS colours) ──
 function downloadExcel(){
-  const rows=[], toYM=TODAY_YM;
-  const genDate=TODAY.toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'});
-  rows.push(['Society 406 — Complete Report']);
-  rows.push(['Generated: '+genDate,'','Period: Oct 2025 – '+monthLabel(toYM)]);
-  rows.push([]);
+  // Report month picker — use a prompt dialog for simplicity
+  var selM=+viewMonth.split('-')[1],selY=+viewMonth.split('-')[0];
+  var reportYM=prompt('Enter month for Sheet 1 (YYYY-MM), e.g. '+TODAY_YM,viewMonth)||viewMonth;
+  if(!/^\d{4}-\d{2}$/.test(reportYM)){reportYM=viewMonth;}
 
-  // MONTH-WISE CONTRIBUTIONS
-  rows.push(['=== CONTRIBUTIONS — MONTH-WISE PAYMENT DETAILS ===']);
-  rows.push([]);
-  let cur=NAV_START;
-  while(cur<=toYM){
-    const mLabel=monthLabel(cur);
-    rows.push(['-- '+mLabel+' --']);
-    rows.push(['Flat','Floor','Block','Base Due','Penalty','Total Due','Paid','Balance','Status','Payment Date(s)','Payment Amount(s)']);
-    FLATS.forEach(f=>{
-      const md=getMD(cur), cc=md.contributions[f.id];
-      const bd=cc.baseDue, pen=getEffectivePenalty(f.id,cur), arr=cc.arrears||0;
-      const paid=cc.paid, due=bd+pen+arr, bal=Math.max(0,due-paid);
-      const sLabel={paid:'Paid',warn:'Due Soon',danger:'Overdue',ok:'Pending'}[getStatus(f.id,cur)]||'';
-      let payDates='—', payAmts='—';
-      if(cc.payments&&cc.payments.length){
-        payDates=cc.payments.map(p=>p.date||mLabel).join(' | ');
-        payAmts=cc.payments.map(p=>'Rs.'+p.amt).join(' | ');
-      } else if(paid>0){ payDates=mLabel; payAmts='Rs.'+paid; }
-      rows.push([f.name,f.floor,f.block,bd,pen,due,paid,bal,sLabel,payDates,payAmts]);
+  if(typeof ExcelJS==='undefined'){toast('\u26a0 ExcelJS loading\u2026 try again in a moment.');return;}
+  var wb=new ExcelJS.Workbook();
+  wb.creator='Society 406 Manager';wb.created=new Date();
+
+  // ── COLOUR PALETTE ──
+  var C={
+    HDR_DARK:'1a1a2e',HDR_DARK_FG:'FFFFFF',
+    HDR_TEAL:'0d7377',HDR_TEAL_FG:'FFFFFF',
+    HDR_GREEN:'2d7a4f',HDR_GREEN_FG:'FFFFFF',
+    HDR_RED:'b02020',HDR_RED_FG:'FFFFFF',
+    GREEN_LT:'e0f5ea',RED_LT:'fde8e8',AMBER_LT:'fff3dc',
+    CREAM:'faf9f6',CREAM_DK:'f0ede6',PAID:'d4edda',PEND:'fff3cd',OVD:'f8d7da',
+    GREY:'6c757d',WHITE:'FFFFFF'
+  };
+  function hdrFont(color){return {name:'Calibri',bold:true,size:11,color:{argb:'FF'+color}};}
+  function fill(hex){return {type:'pattern',pattern:'solid',fgColor:{argb:'FF'+hex}};}
+  function border(){return {top:{style:'thin',color:{argb:'FFDDDDDD'}},bottom:{style:'thin',color:{argb:'FFDDDDDD'}},left:{style:'thin',color:{argb:'FFDDDDDD'}},right:{style:'thin',color:{argb:'FFDDDDDD'}}};}
+  function applyRow(row,fillHex,bold){
+    row.eachCell(function(cell){
+      if(fillHex)cell.fill=fill(fillHex);
+      cell.border=border();
+      if(bold)cell.font=Object.assign({},cell.font||{},{bold:true,name:'Calibri',size:10});
+      else if(!cell.font||!cell.font.bold){cell.font={name:'Calibri',size:10};}
+      cell.alignment={vertical:'middle',wrapText:true};
     });
-    let mCol=0, mPend=0;
-    FLATS.forEach(f=>{ const cc=allData[cur]?.contributions[f.id]; if(cc){ mCol+=cc.paid||0; mPend+=flatBal(f.id,cur); } });
-    rows.push(['','','MONTH TOTAL','','','',mCol,mPend,'','','']);
-    rows.push([]);
-    cur=nextYM(cur);
+  }
+  function mergeTitle(ws,text,cols,fillHex,fgHex){
+    var r=ws.addRow([text]);for(var i=2;i<=cols;i++)r.getCell(i).value=null;
+    ws.mergeCells(r.number,1,r.number,cols);
+    r.getCell(1).font=hdrFont(fgHex||C.HDR_DARK_FG);r.getCell(1).fill=fill(fillHex||C.HDR_DARK);
+    r.getCell(1).alignment={horizontal:'center',vertical:'middle'};r.getCell(1).border=border();
+    r.height=22;return r;
   }
 
-  // MONTH-WISE EXPENSES
-  rows.push(['=== EXPENSES — MONTH-WISE ===']);
-  rows.push([]);
-  cur=NAV_START;
-  while(cur<=toYM){
-    const mExps=expsForMonth(cur);
-    if(mExps.length){
-      rows.push(['-- '+monthLabel(cur)+' --']);
-      rows.push(['Date','Description','Category','Amount (Rs.)','Notes']);
-      mExps.forEach(e=>{
-        const ds=new Date(e.date+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
-        rows.push([ds,e.desc,e.cat.replace(/[^a-zA-Z0-9 ]/g,''),e.amount,e.notes||'']);
-      });
-      rows.push(['','MONTH TOTAL','',''+mExps.reduce((s,e)=>s+e.amount,0),'']);
-      rows.push([]);
-    }
-    cur=nextYM(cur);
-  }
-
-  // CUMULATIVE SUMMARY
-  rows.push(['=== CUMULATIVE SUMMARY ===']);
-  rows.push(['Flat','Floor','Block','Total Base Due','Total Penalty','Total Due','Total Paid','Total Balance','Status']);
-  FLATS.forEach(f=>{
-    const bd=cumBaseDue(f.id,toYM), pen=cumPenalty(f.id,toYM), paid=cumPaid(f.id,toYM);
-    const due=bd+pen, bal=Math.max(0,due-paid), s=getStatus(f.id,toYM);
-    rows.push([f.name,f.floor,f.block,bd,pen,due,paid,bal,{paid:'Paid',warn:'Due Soon',danger:'Overdue',ok:'Pending'}[s]||s]);
+  // ════════════════════════════════════════
+  // SHEET 1: MONTHLY REPORT (selected month)
+  // ════════════════════════════════════════
+  var ws1=wb.addWorksheet('Monthly Report - '+monthLabel(reportYM),{
+    pageSetup:{paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1}
   });
-  rows.push([]);
-  rows.push(['Total Collected','Rs.'+totCollected(toYM)]);
-  rows.push(['Total Spent','Rs.'+totSpent(toYM)]);
-  rows.push(['Society Balance','Rs.'+(totCollected(toYM)-totSpent(toYM))]);
-  rows.push(['Pending Dues','Rs.'+totPending(toYM)]);
-  rows.push(['Flats Paid',paidCnt(toYM)+'/7']);
+  ws1.columns=[{width:22},{width:14},{width:14},{width:14},{width:14},{width:14},{width:14},{width:14},{width:14},{width:20},{width:22}];
 
-  const csv=rows.map(r=>r.map(c=>{ const s=String(c===undefined||c===null?'':c); return s.includes(',')||s.includes('"')?'"'+s.replace(/"/g,'""')+'"':s; }).join(',')).join('\n');
-  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
-  const url=URL.createObjectURL(blob), a=document.createElement('a');
-  a.href=url; a.download='Society_406_Full_Report_'+toYM+'.csv';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-  toast('Full report downloaded (Oct 2025 to '+monthLabel(toYM)+')!');
+  // Title
+  mergeTitle(ws1,'Society 406 — Monthly Report: '+monthLabel(reportYM),11,C.HDR_DARK);
+  ws1.addRow([]);
+
+  // ── SUMMARY ──
+  mergeTitle(ws1,'📊 SUMMARY',11,C.HDR_TEAL);
+  var sumData=[
+    ['Total Contributions Collected','Rs.'+totCollected(reportYM)],
+    ['Total Expenses Paid','Rs.'+totSpent(reportYM)],
+    ['Society Balance (Collected - Spent)','Rs.'+(totCollected(reportYM)-totSpent(reportYM))],
+    ['Pending Dues','Rs.'+totPending(reportYM)],
+    ['Flats Cleared',paidCnt(reportYM)+' / 7']
+  ];
+  sumData.forEach(function(sd){
+    var r=ws1.addRow(sd);
+    r.getCell(1).font={bold:true,name:'Calibri',size:10};r.getCell(2).font={name:'Calibri',size:10};
+    r.getCell(1).fill=fill(C.CREAM_DK);r.getCell(2).fill=fill(C.CREAM);
+    r.eachCell(function(c){c.border=border();c.alignment={vertical:'middle'};});
+    r.height=18;
+  });
+  ws1.addRow([]);
+
+  // ── CONTRIBUTION SUMMARY ──
+  mergeTitle(ws1,'💰 CONTRIBUTION SUMMARY — '+monthLabel(reportYM),11,C.HDR_GREEN);
+  var hdrRow1=ws1.addRow(['Flat','Floor','Block','Base Due','Penalty','Total Due','Paid','Balance','Status','Payment Date(s)','Payment Amount(s)']);
+  hdrRow1.height=20;applyRow(hdrRow1,C.HDR_GREEN,true);
+  hdrRow1.eachCell(function(c){c.font=hdrFont(C.HDR_GREEN_FG);c.alignment={horizontal:'center',vertical:'middle',wrapText:true};});
+
+  FLATS.forEach(function(f){
+    var bd=cumBaseDue(f.id,reportYM),pen=cumPenalty(f.id,reportYM),paid=cumPaid(f.id,reportYM),due=bd+pen,bal=Math.max(0,due-paid);
+    var s=getStatus(f.id,reportYM),sLabel={paid:'Paid',warn:'Due Soon',danger:'Overdue',ok:'Pending'}[s]||'';
+    var cc=allData[reportYM]&&allData[reportYM].contributions[f.id];
+    var ap=cc?cc.paid||0:0,ps=cc?(cc.payments||[]).reduce(function(s,p){return s+(p.amt||0);},0):0;
+    var payDates='-',payAmts='-';
+    if(ap>0){if(cc&&cc.payments&&cc.payments.length&&Math.abs(ps-ap)<0.01){payDates=cc.payments.map(function(p){return p.date||monthLabel(reportYM);}).join('\n');payAmts=cc.payments.map(function(p){return 'Rs.'+p.amt;}).join('\n');}else{payDates=monthLabel(reportYM);payAmts='Rs.'+ap;}}
+    var row=ws1.addRow([f.name,f.floor,f.block,bd,pen,due,paid,bal,sLabel,payDates,payAmts]);
+    row.height=18;
+    var rowFill=s==='paid'?C.PAID:s==='danger'?C.OVD:s==='warn'?C.PEND:C.WHITE;
+    applyRow(row,rowFill,false);
+    row.getCell(6).font={bold:true,name:'Calibri',size:10};
+    row.getCell(8).font={bold:true,name:'Calibri',size:10,color:{argb:'FF'+(bal>0?C.HDR_RED:C.HDR_GREEN)}};
+    [4,5,6,7,8].forEach(function(ci){row.getCell(ci).alignment={horizontal:'right',vertical:'middle'};});
+  });
+  // Totals row
+  var totalRow1=ws1.addRow(['TOTAL','','',cumBaseDue('406A-GF',reportYM)+cumBaseDue('406A-FF',reportYM)+cumBaseDue('406A-SF',reportYM)+cumBaseDue('406B-GF',reportYM)+cumBaseDue('406B-FF',reportYM)+cumBaseDue('406B-SF',reportYM)+cumBaseDue('AHUJA',reportYM),'','',totCollected(reportYM),totPending(reportYM),'','','']);
+  applyRow(totalRow1,C.CREAM_DK,true);totalRow1.height=20;
+  ws1.addRow([]);
+
+  // ── PAYMENT TRANSACTIONS ──
+  mergeTitle(ws1,'📅 PAYMENT TRANSACTIONS — '+monthLabel(reportYM),11,C.HDR_TEAL);
+  var ptHdr=ws1.addRow(['Flat','Floor','Payment Date','Amount (Rs.)','Note']);
+  applyRow(ptHdr,C.HDR_TEAL,true);ptHdr.eachCell(function(c){c.font=hdrFont(C.HDR_TEAL_FG);c.alignment={horizontal:'center',vertical:'middle'};});ptHdr.height=20;
+  var hasPayments=false;
+  FLATS.forEach(function(f){
+    var cc=allData[reportYM]&&allData[reportYM].contributions[f.id];
+    if(!cc||!cc.paid)return;
+    if(cc.payments&&cc.payments.length>0){
+      cc.payments.forEach(function(p){
+        var r=ws1.addRow([f.name,f.floor,p.date||monthLabel(reportYM),'Rs.'+p.amt,p.note||'']);
+        applyRow(r,C.GREEN_LT,false);r.height=18;r.getCell(4).alignment={horizontal:'right',vertical:'middle'};hasPayments=true;
+      });
+    }else{
+      var r=ws1.addRow([f.name,f.floor,monthLabel(reportYM),'Rs.'+cc.paid,'']);
+      applyRow(r,C.GREEN_LT,false);r.height=18;r.getCell(4).alignment={horizontal:'right',vertical:'middle'};hasPayments=true;
+    }
+  });
+  if(!hasPayments){var nr=ws1.addRow(['No payments recorded for '+monthLabel(reportYM)]);applyRow(nr,C.CREAM,false);}
+  ws1.addRow([]);
+
+  // ── EXPENSE DETAILS ──
+  mergeTitle(ws1,'🧾 EXPENSE DETAILS — '+monthLabel(reportYM),11,C.HDR_RED);
+  var exHdr=ws1.addRow(['Date','Description','Category','Amount (Rs.)','Notes']);
+  applyRow(exHdr,C.HDR_RED,true);exHdr.eachCell(function(c){c.font=hdrFont(C.HDR_RED_FG);c.alignment={horizontal:'center',vertical:'middle'};});exHdr.height=20;
+  var mExps=expsForMonth(reportYM);
+  if(mExps.length){
+    mExps.forEach(function(e){
+      var ds=new Date(e.date+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+      var r=ws1.addRow([ds,e.desc,e.cat.replace(/[^\w\s]/g,''),'Rs.'+e.amount,e.notes||'']);
+      var bg=CAT_BG[e.cat]?CAT_BG[e.cat].replace('#',''):C.AMBER_LT;
+      applyRow(r,bg,false);r.height=18;r.getCell(4).alignment={horizontal:'right',vertical:'middle'};
+    });
+    var eTot=ws1.addRow(['','TOTAL EXPENSES','','Rs.'+mExps.reduce(function(s,e){return s+e.amount;},0),'']);
+    applyRow(eTot,C.CREAM_DK,true);eTot.height=18;eTot.getCell(4).alignment={horizontal:'right',vertical:'middle'};
+  }else{var nr2=ws1.addRow(['No expenses for '+monthLabel(reportYM)]);applyRow(nr2,C.CREAM,false);}
+
+  // ════════════════════════════════════════
+  // SHEET 2: FULL REPORT (all months)
+  // ════════════════════════════════════════
+  var ws2=wb.addWorksheet('Full Report — All Months',{
+    pageSetup:{paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1}
+  });
+  ws2.columns=[{width:22},{width:14},{width:12},{width:12},{width:12},{width:12},{width:12},{width:12},{width:12},{width:20},{width:22}];
+  mergeTitle(ws2,'Society 406 — Complete Report: Oct 2025 to '+monthLabel(TODAY_YM),11,C.HDR_DARK);
+  ws2.addRow([]);
+
+  // Vehicle & Contact Directory
+  mergeTitle(ws2,'🏍 FLAT DIRECTORY — VEHICLES & CONTACTS',11,C.HDR_TEAL);
+  var vHdr=ws2.addRow(['Flat','Floor','Block','Owner / Contact Name','Phone Number','Vehicle 1 (Type)','Vehicle 1 (Number)','Vehicle 2 (Type)','Vehicle 2 (Number)']);
+  applyRow(vHdr,C.HDR_TEAL,true);vHdr.eachCell(function(c){c.font=hdrFont(C.HDR_TEAL_FG);});vHdr.height=20;
+  FLATS.forEach(function(f){
+    var det=getDetails(f.id);
+    var v1t=det.vehicles&&det.vehicles[0]?det.vehicles[0].type:'',v1n=det.vehicles&&det.vehicles[0]?det.vehicles[0].number:'';
+    var v2t=det.vehicles&&det.vehicles[1]?det.vehicles[1].type:'',v2n=det.vehicles&&det.vehicles[1]?det.vehicles[1].number:'';
+    var r=ws2.addRow([f.name,f.floor,f.block,det.ownerName||'',det.contact||'',v1t,v1n,v2t,v2n]);
+    applyRow(r,C.CREAM_DK,false);r.height=18;
+  });
+  ws2.addRow([]);
+
+  // Month-wise contributions
+  var cur=NAV_START;
+  while(cur<=TODAY_YM){
+    mergeTitle(ws2,'\u2014 '+monthLabel(cur)+' \u2014',11,cur===TODAY_YM?C.HDR_GREEN:'2c3e50');
+    var mHdr=ws2.addRow(['Flat','Floor','Block','Base Due','Penalty','Total Due','Paid','Balance','Status','Payment Date(s)','Payment Amount(s)']);
+    applyRow(mHdr,cur===TODAY_YM?C.HDR_GREEN:'2c3e50',true);
+    mHdr.eachCell(function(c){c.font=hdrFont(C.HDR_DARK_FG);c.alignment={horizontal:'center',vertical:'middle'};});mHdr.height=18;
+    FLATS.forEach(function(f){
+      var md=getMD(cur),cc=md.contributions[f.id];
+      var bd=cc.baseDue,pen=getEffectivePenalty(f.id,cur),arr=cc.arrears||0,paid=cc.paid,due=bd+pen+arr,bal=Math.max(0,due-paid);
+      var s=getStatus(f.id,cur),sL={paid:'Paid',warn:'Due Soon',danger:'Overdue',ok:'Pending'}[s]||'';
+      var ap=cc.paid||0,ps=(cc.payments||[]).reduce(function(sv,p){return sv+(p.amt||0);},0);
+      var pDates='-',pAmts='-';
+      if(ap>0){if(cc.payments&&cc.payments.length&&Math.abs(ps-ap)<0.01){pDates=cc.payments.map(function(p){return p.date||monthLabel(cur);}).join(' | ');pAmts=cc.payments.map(function(p){return 'Rs.'+p.amt;}).join(' | ');}else{pDates=monthLabel(cur);pAmts='Rs.'+ap;}}
+      var row=ws2.addRow([f.name,f.floor,f.block,bd,pen,due,paid,bal,sL,pDates,pAmts]);
+      var rf=s==='paid'?C.PAID:s==='danger'?C.OVD:s==='warn'?C.PEND:C.WHITE;
+      applyRow(row,rf,false);row.height=18;
+      [4,5,6,7,8].forEach(function(ci){row.getCell(ci).alignment={horizontal:'right',vertical:'middle'};});
+    });
+    var exps2=expsForMonth(cur);
+    if(exps2.length){
+      var eHdr2=ws2.addRow(['  Expenses\u2193','Date','Category','Amount','Notes','','','','']);
+      applyRow(eHdr2,C.AMBER_LT,true);eHdr2.height=16;
+      exps2.forEach(function(e){
+        var ds2=new Date(e.date+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+        var er=ws2.addRow(['',ds2,e.desc,'Rs.'+e.amount,e.notes||'','','','','']);
+        applyRow(er,C.AMBER_LT,false);er.height=16;er.getCell(4).alignment={horizontal:'right'};
+      });
+    }
+    ws2.addRow([]);cur=nextYM(cur);
+  }
+
+  // Cumulative summary
+  mergeTitle(ws2,'📊 CUMULATIVE SUMMARY — All Time',11,C.HDR_DARK);
+  var csHdr=ws2.addRow(['Flat','Floor','Block','Total Base Due','Total Penalty','Total Due','Total Paid','Total Balance','Status']);
+  applyRow(csHdr,C.HDR_DARK,true);csHdr.eachCell(function(c){c.font=hdrFont(C.HDR_DARK_FG);});csHdr.height=20;
+  FLATS.forEach(function(f){
+    var bd2=cumBaseDue(f.id,TODAY_YM),pen2=cumPenalty(f.id,TODAY_YM),paid2=cumPaid(f.id,TODAY_YM),due2=bd2+pen2,bal2=Math.max(0,due2-paid2),s2=getStatus(f.id,TODAY_YM);
+    var r2=ws2.addRow([f.name,f.floor,f.block,bd2,pen2,due2,paid2,bal2,{paid:'Paid',warn:'Due Soon',danger:'Overdue',ok:'Pending'}[s2]||s2]);
+    var rf2=s2==='paid'?C.PAID:s2==='danger'?C.OVD:s2==='warn'?C.PEND:C.WHITE;
+    applyRow(r2,rf2,false);r2.height=18;
+    [4,5,6,7,8].forEach(function(ci){r2.getCell(ci).alignment={horizontal:'right',vertical:'middle'};});
+  });
+  ws2.addRow([]);
+  var sumRows=[['Total Collected','Rs.'+totCollected(TODAY_YM)],['Total Spent','Rs.'+totSpent(TODAY_YM)],['Society Balance','Rs.'+(totCollected(TODAY_YM)-totSpent(TODAY_YM))],['Pending Dues','Rs.'+totPending(TODAY_YM)],['Flats Paid',paidCnt(TODAY_YM)+'/7']];
+  sumRows.forEach(function(sr){var r=ws2.addRow(sr);applyRow(r,C.CREAM_DK,true);r.height=18;r.getCell(2).alignment={horizontal:'right'};});
+
+  // ── DOWNLOAD ──
+  wb.xlsx.writeBuffer().then(function(buffer){
+    var blob=new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    var url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download='Society_406_Report_'+TODAY_YM+'.xlsx';
+    document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
+    toast('\ud83d\udcca Excel report downloaded with 2 coloured sheets!');
+  }).catch(function(err){console.error('Excel error:',err);toast('\u274c Excel generation failed: '+err.message);});
 }
 
-// ── TOAST ──
-function toast(msg){
-  const t=document.createElement('div'); t.className='toast'; t.textContent=msg;
-  document.body.appendChild(t);
-  setTimeout(()=>{ t.style.opacity='0'; t.style.transform='translateX(40px)'; t.style.transition='all .3s'; setTimeout(()=>t.remove(),380); },2800);
-}
+function toast(msg){var t=document.createElement('div');t.className='toast';t.textContent=msg;document.body.appendChild(t);setTimeout(function(){t.style.opacity='0';t.style.transform='translateX(40px)';t.style.transition='all .3s';setTimeout(function(){t.remove();},380);},2800);}
 
-// ═══════════════════════════════════════════════════════════════
-//  INIT
-// ═══════════════════════════════════════════════════════════════
 (function init(){
-  loadSt();                          // localStorage immediately; Firebase async
-  cfg = {...DEFAULT_CFG, ...cfg};   // merge: ensure all new fields exist
-  fixOldData();                      // zero out stale baseDue for pre-contribStart months
-  ensureMonth(TODAY_YM);
-  // Show "Connecting…" badge; Firebase module will update it once ready
-  document.addEventListener('firebase-ready', ()=>_updateFbBadge(true), {once:true});
+  loadSt();cfg=Object.assign({},DEFAULT_CFG,cfg);
+  if(!cfg.flatNames)cfg.flatNames={};if(!cfg.flatDetails)cfg.flatDetails={};
+  applyFlatNames();fixOldData();refreshLoginDropdown();ensureMonth(TODAY_YM);setSyncBadge('off');
+  // Auto-connect: DOMContentLoaded handler above handles hardcoded config.
+  // This fallback handles any previously saved config from Settings UI.
+  (function tryFallbackConnect(){
+    var hc = window.HARDCODED_FB_CFG;
+    var hardcoded = window.FB_AUTO_CONNECT
+                 && hc && hc.apiKey
+                 && hc.apiKey !== 'YOUR_API_KEY'
+                 && hc.projectId !== 'YOUR_PROJECT_ID';
+    if (!hardcoded) {
+      // Use config saved via Settings UI (if any)
+      var saved = getSavedFbCfg();
+      if (saved && saved.apiKey) {
+        setTimeout(function(){ initCloud(saved); }, 600);
+      }
+    }
+  })();
 })();
+
 </script>
+
+<!-- ── VEHICLE / CONTACT DETAILS MODAL ── -->
+<div id="vehicle-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:600;display:none;align-items:center;justify-content:center;padding:16px">
+  <div class="modal-box" style="max-width:500px;width:100%">
+    <div class="modal-hd">
+      <div>
+        <div class="modal-title" id="veh-modal-title">✏️ Edit Flat Details</div>
+        <div class="modal-sub" id="veh-modal-sub"></div>
+      </div>
+      <button class="modal-close" onclick="closeVehicleModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="fg" style="margin-bottom:12px">
+        <label class="fl">👤 Owner / Contact Name</label>
+        <input type="text" class="fi" id="veh-owner" placeholder="e.g. Sharma Family">
+      </div>
+      <div class="fg" style="margin-bottom:12px">
+        <label class="fl">📞 Contact Number</label>
+        <input type="tel" class="fi" id="veh-contact" placeholder="e.g. 9876543210">
+      </div>
+      <label class="fl" style="margin-bottom:8px;display:block">🚗 Vehicles</label>
+      <div id="veh-list-edit"></div>
+      <button class="btn btn-t" style="margin-top:6px;width:100%" onclick="addVehicleRow()">+ Add Vehicle</button>
+    </div>
+    <div class="modal-ft">
+      <button class="btn btn-ghost" onclick="closeVehicleModal()">Cancel</button>
+      <button class="btn btn-pri" onclick="saveVehicleDetails()">💾 Save Details</button>
+    </div>
+  </div>
+</div>
+
 
 
 <!-- ── QR LIGHTBOX MODAL ── -->
