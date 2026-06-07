@@ -8,62 +8,32 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <!-- Firebase for cloud sync -->
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
 
-<!-- ══════════════════════════════════════════════════════
-     FIREBASE CONFIG — fill in ALL 7 values below
-     ✏️  Go to: Firebase Console → Your Project →
-         Project Settings → Your apps → Web app →
-         Copy the firebaseConfig object values here.
-
-     ALSO: Go to Firebase Console → Firestore Database
-     → Rules tab → Replace rules with:
-     rules_version = '2';
-     service cloud.firestore {
-       match /databases/{database}/documents {
-         match /{document=**} {
-           allow read, write: if true;
-         }
-       }
-     }
-     → Click Publish. (This allows all reads/writes.)
-════════════════════════════════════════════════════════ -->
+<!-- ════════════════════════════════════════════════════════
+     FIREBASE CONFIG — Realtime Database
+     Your config is already filled in below.
+     Just upload this file to GitHub as index.html.
+═════════════════════════════════════════════════════════ -->
 <script>
-window.HARDCODED_FB_CFG = {
-  apiKey: "AIzaSyCE1BtA3_DqghMxtNCQ6yK8UCKtAE1xXb4",
-  authDomain: "society406.firebaseapp.com",
-  projectId: "society406",
-  storageBucket: "society406.firebasestorage.app",
+var SOCIETY_FB_CFG = {
+  apiKey:            "AIzaSyCE1BtA3_DqghMxtNCQ6yK8UCKtAE1xXb4",
+  authDomain:        "society406.firebaseapp.com",
+  databaseURL:       "https://society406-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId:         "society406",
+  storageBucket:     "society406.firebasestorage.app",
   messagingSenderId: "661341922918",
-  appId: "1:661341922918:web:c7e603a5dd329123f42fa7",
-  measurementId: "G-VTT0FMQBJJ"
+  appId:             "1:661341922918:web:c7e603a5dd329123f42fa7",
+  measurementId:     "G-VTT0FMQBJJ"
 };
-window.FB_AUTO_CONNECT = true;
 
-// Auto-connect runs after all scripts have loaded (DOMContentLoaded
-// guarantees the compat SDK scripts above are executed).
+// Auto-connect after all scripts have loaded
 document.addEventListener('DOMContentLoaded', function() {
-  var hc = window.HARDCODED_FB_CFG;
-  var ok = window.FB_AUTO_CONNECT
-        && hc && hc.apiKey
-        && hc.apiKey !== 'YOUR_API_KEY'
-        && hc.projectId !== 'YOUR_PROJECT_ID';
-  if (!ok) {
-    console.info('Society 406: Firebase config not filled in — local-only mode.');
-    return;
-  }
-  // Small delay so the rest of the app scripts fully initialise first
   setTimeout(function() {
-    if (typeof initCloud === 'function') {
-      saveFbCfgLocal(hc);
-      var connected = initCloud(hc);
-      if (connected) {
-        console.info('Society 406: Firebase Firestore connected ✅');
-      } else {
-        console.warn('Society 406: Firebase connection failed — check config and Firestore rules.');
-      }
+    if (typeof initCloudRTDB === 'function') {
+      initCloudRTDB(SOCIETY_FB_CFG);
     }
-  }, 500);
+  }, 400);
 });
 </script>
 <!-- ExcelJS for coloured multi-sheet reports -->
@@ -431,6 +401,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="u-av" id="u-av">🏠</div>
       <div><div class="u-nm" id="u-nm">Member</div><div class="r-pill r-mem" id="u-role">MEMBER</div></div>
     </div>
+    <span id="fb-badge" style="font-size:11px;padding:3px 10px;border-radius:20px;font-weight:600;background:rgba(255,255,255,.1);color:rgba(255,255,255,.45);border:1px solid rgba(255,255,255,.12)">⏳ Connecting…</span>
     <button class="btn-lo" onclick="doLogout()">← Logout</button>
   </div>
 </div>
@@ -677,7 +648,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);m
       <div class="ss-title">☁️ Cloud Sync — Live Data Across All Devices</div>
       <div class="ss-desc">
         Connect to <strong>Firebase</strong> so every change (contributions, expenses, settings) instantly appears on all members' and admin's devices.
-        Firebase config is hardcoded in the app. Connection happens automatically on page load. Status shown in the top bar.
+        Free tier supports this society easily. <a href="https://console.firebase.google.com" target="_blank" style="color:var(--teal)">→ Setup guide below</a>
       </div>
       <div style="background:var(--cream-dk);border-radius:var(--rsm);padding:12px 14px;margin-bottom:14px;font-size:12px;color:var(--ink-lt);line-height:1.8">
         <strong>Quick Setup (5 mins):</strong><br>
@@ -1046,54 +1017,123 @@ function saveVehicleDetails(){
 }
 function flatDisplayName(fid){var f=FLATS.find(function(x){return x.id===fid;});return f?f.name+' \u00b7 '+f.floor:fid;}
 
-// ── CLOUD ──
+// ── CLOUD — Firebase Realtime Database ──
+var rtdb = null;
+var _rtdbPath = 'society406/appdata';
+var _rtdbListenerActive = false;
+
 function setSyncBadge(state){
-  var el=document.getElementById('sync-badge');if(!el)return;
-  var map={on:'\u2601\ufe0f Live Sync',saving:'\u23f3 Saving\u2026',error:'\u274c Sync Error',off:'\ud83d\udcbe Local Only'};
-  var cls={on:'sync-on',saving:'sync-saving',error:'sync-error',off:'sync-off'};
-  el.textContent=map[state]||state;el.className='sync-badge '+(cls[state]||'sync-off');
+  // Update both the topbar badge (fb-badge) and Settings UI badge (sync-badge)
+  ['fb-badge','sync-badge'].forEach(function(id){
+    var el=document.getElementById(id); if(!el) return;
+    if(state==='on'){
+      el.textContent='🔥 Live';
+      el.className='sync-badge sync-on';
+      el.style.cssText='font-size:11px;padding:3px 10px;border-radius:20px;font-weight:600;background:rgba(45,122,79,.3);color:rgba(74,221,128,.95);border:1px solid rgba(74,221,128,.25)';
+    } else if(state==='saving'){
+      el.textContent='⏳ Saving…';
+      el.className='sync-badge sync-saving';
+      el.style.cssText='font-size:11px;padding:3px 10px;border-radius:20px;font-weight:600;background:rgba(176,96,0,.25);color:#fbbf24;border:1px solid rgba(176,96,0,.25)';
+    } else if(state==='error'){
+      el.textContent='⚠ Error';
+      el.className='sync-badge sync-error';
+      el.style.cssText='font-size:11px;padding:3px 10px;border-radius:20px;font-weight:600;background:rgba(176,32,32,.25);color:#f87171;border:1px solid rgba(176,32,32,.25)';
+    } else {
+      el.textContent='💾 Local';
+      el.className='sync-badge sync-off';
+      el.style.cssText='font-size:11px;padding:3px 10px;border-radius:20px;font-weight:600;background:rgba(255,255,255,.08);color:rgba(255,255,255,.4);border:1px solid rgba(255,255,255,.12)';
+    }
+  });
 }
 function getSavedFbCfg(){try{var s=localStorage.getItem(FB_KEY);return s?JSON.parse(s):null;}catch(e){return null;}}
 function saveFbCfgLocal(fc){localStorage.setItem(FB_KEY,JSON.stringify(fc));}
 
-function initCloud(fbCfg){
-  if(!fbCfg||!fbCfg.apiKey||!fbCfg.projectId){setSyncBadge('off');return false;}
+// initCloudRTDB — called automatically on DOMContentLoaded with hardcoded config
+// Also called by connectCloud() from Settings UI
+function initCloudRTDB(fbCfg){
+  if(!fbCfg||!fbCfg.apiKey||!fbCfg.databaseURL){setSyncBadge('off');return false;}
   try{
     var app=(typeof firebase!=='undefined'&&firebase.apps&&firebase.apps.length>0)?firebase.app():firebase.initializeApp(fbCfg);
-    db=firebase.firestore(app);cloudEnabled=true;setSyncBadge('on');startCloudListener();return true;
-  }catch(e){console.error('Firebase init error:',e);cloudEnabled=false;db=null;setSyncBadge('error');toast('\u26a0 Cloud connect failed: '+e.message);return false;}
+    rtdb=firebase.database(app);
+    cloudEnabled=true;
+    setSyncBadge('on');
+    saveFbCfgLocal(fbCfg);
+    _loadFromRTDB();       // fetch latest data immediately
+    _startRTDBListener();  // then watch for real-time changes
+    return true;
+  }catch(e){
+    console.error('Firebase RTDB init error:',e);
+    cloudEnabled=false; rtdb=null; setSyncBadge('error');
+    toast('⚠ Cloud connect failed: '+e.message);
+    return false;
+  }
 }
-function startCloudListener(){
-  if(!db)return;if(cloudUnsub)cloudUnsub();
-  var ref=db.collection('society406').doc('appdata');
-  cloudUnsub=ref.onSnapshot(function(snap){
-    // ignoreNextSnap was used to skip own-saves bouncing back.
-    // We reset it here but still process the snapshot so OTHER devices' changes always show.
-    var selfSave = ignoreNextSnap;
-    ignoreNextSnap = false;
-    if(!snap.exists){setSyncBadge('on');return;}
-    var d=snap.data();
+// Keep initCloud() name so Settings UI button still works
+function initCloud(fbCfg){ return initCloudRTDB(fbCfg); }
+
+// Load latest data from Firebase once on connect
+function _loadFromRTDB(){
+  if(!rtdb)return;
+  rtdb.ref(_rtdbPath).once('value').then(function(snap){
+    if(!snap.exists())return;
+    var d=snap.val();
     if(d.cfg)cfg=Object.assign({},DEFAULT_CFG,d.cfg);
     if(d.allData)allData=d.allData;
     if(d.adminPin)adminPin=d.adminPin;
-    if(!cfg.flatNames)cfg.flatNames={};if(!cfg.flatDetails)cfg.flatDetails={};
+    if(!cfg.flatNames)cfg.flatNames={};
+    if(!cfg.flatDetails)cfg.flatDetails={};
     applyFlatNames();fixOldData();ensureMonth(TODAY_YM);
     try{localStorage.setItem(SK.cfg,JSON.stringify(cfg));localStorage.setItem(SK.data,JSON.stringify(allData));localStorage.setItem(SK.pin,adminPin);}catch(e){}
     setSyncBadge('on');
-    // Always re-render — even on self-save, to keep all members in sync
     if(currentUser){try{renderAll();}catch(e){console.error(e);}}
-  },function(err){console.error('Cloud listener:',err);setSyncBadge('error');});
+  }).catch(function(e){console.error('RTDB load failed:',e);setSyncBadge('error');});
 }
+
+// Real-time listener — all members auto-update when admin saves
+function _startRTDBListener(){
+  if(_rtdbListenerActive||!rtdb)return;
+  _rtdbListenerActive=true;
+  rtdb.ref(_rtdbPath).on('value',function(snap){
+    if(!snap.exists())return;
+    if(cloudSaving)return; // skip echo of our own save
+    var d=snap.val();
+    if(d.cfg)cfg=Object.assign({},DEFAULT_CFG,d.cfg);
+    if(d.allData)allData=d.allData;
+    if(d.adminPin)adminPin=d.adminPin;
+    if(!cfg.flatNames)cfg.flatNames={};
+    if(!cfg.flatDetails)cfg.flatDetails={};
+    applyFlatNames();fixOldData();ensureMonth(TODAY_YM);
+    try{localStorage.setItem(SK.cfg,JSON.stringify(cfg));localStorage.setItem(SK.data,JSON.stringify(allData));localStorage.setItem(SK.pin,adminPin);}catch(e){}
+    setSyncBadge('on');
+    if(currentUser){try{renderAll();}catch(e){console.error(e);}}
+  },function(err){console.error('RTDB listener error:',err);setSyncBadge('error');});
+}
+// Compatibility alias
+function startCloudListener(){_startRTDBListener();}
+
 function saveToCloud(){
-  if(!db||cloudSaving)return;cloudSaving=true;setSyncBadge('saving');ignoreNextSnap=true;
-  db.collection('society406').doc('appdata').set({cfg:cfg,allData:allData,adminPin:adminPin,updatedAt:firebase.firestore.FieldValue.serverTimestamp()})
-    .then(function(){setSyncBadge('on');cloudSaving=false;showSaveInd();})
-    .catch(function(e){console.error('Cloud save failed:',e);setSyncBadge('error');cloudSaving=false;ignoreNextSnap=false;saveLocal();toast('\u26a0 Cloud save failed \u2014 saved locally.');});
+  if(!rtdb||cloudSaving)return;
+  cloudSaving=true; setSyncBadge('saving');
+  var payload={
+    cfg:JSON.parse(JSON.stringify(cfg)),
+    allData:JSON.parse(JSON.stringify(allData)),
+    adminPin:adminPin,
+    updatedAt:Date.now()
+  };
+  rtdb.ref(_rtdbPath).set(payload)
+    .then(function(){
+      setSyncBadge('on');cloudSaving=false;showSaveInd();
+    })
+    .catch(function(e){
+      console.error('RTDB save failed:',e);setSyncBadge('error');
+      cloudSaving=false;saveLocal();
+      toast('⚠ Cloud save failed — saved locally.');
+    });
 }
 function saveLocal(){try{localStorage.setItem(SK.cfg,JSON.stringify(cfg));localStorage.setItem(SK.data,JSON.stringify(allData));localStorage.setItem(SK.pin,adminPin);}catch(e){console.warn(e);}}
-function saveSt(){saveLocal();if(cloudEnabled&&db){saveToCloud();}else{showSaveInd();}}
+function saveSt(){saveLocal();if(cloudEnabled&&rtdb){saveToCloud();}else{showSaveInd();}}
 function loadSt(){try{var c=localStorage.getItem(SK.cfg);if(c)cfg=Object.assign({},DEFAULT_CFG,JSON.parse(c));var d=localStorage.getItem(SK.data);if(d)allData=JSON.parse(d);var p=localStorage.getItem(SK.pin);if(p)adminPin=p;}catch(e){console.warn(e);}}
-function showSaveInd(){var o=document.getElementById('save-ind');if(o)o.remove();var el=document.createElement('div');el.id='save-ind';el.className='save-indicator';el.textContent=cloudEnabled?'\u2601\ufe0f Saved to Cloud':'\u2705 Saved';document.body.appendChild(el);setTimeout(function(){el.style.opacity='0';el.style.transition='opacity .4s';setTimeout(function(){el.remove();},450);},1800);}
+function showSaveInd(){var o=document.getElementById('save-ind');if(o)o.remove();var el=document.createElement('div');el.id='save-ind';el.className='save-indicator';el.textContent=cloudEnabled?'🔥 Saved & synced to all members':'✅ Saved locally';document.body.appendChild(el);setTimeout(function(){el.style.opacity='0';el.style.transition='opacity .4s';setTimeout(function(){el.remove();},450);},1800);}
 
 function fixOldData(){
   var cs=contribStartYM();
@@ -1573,10 +1613,7 @@ function loadCfgForm(){
   refreshQRPreview();
 }
 function loadCloudCfgForm(){
-  // Pre-fill with hardcoded config if available, otherwise use saved
-  var hc=window.HARDCODED_FB_CFG;
-  var prefill=(window.FB_AUTO_CONNECT&&hc&&hc.apiKey&&hc.apiKey!=='YOUR_API_KEY')?hc:getSavedFbCfg();
-  var saved=prefill;if(!saved)return;
+  var saved=getSavedFbCfg();if(!saved)return;
   ['apiKey','authDomain','projectId','storageBucket','messagingSenderId','appId'].forEach(function(k){var el=document.getElementById('fb-'+k);if(el&&saved[k])el.value=saved[k];});
   if(cloudEnabled){var btn=document.getElementById('cloud-connect-btn');if(btn){btn.textContent='\u2601\ufe0f Connected \u2014 Reconnect';btn.style.background='var(--green)';}}
 }
@@ -1603,13 +1640,6 @@ function saveSettings(){
   saveSt();try{renderAll();}catch(e){console.error(e);}toast('\u2705 Settings saved and synced to all devices!');
 }
 function connectCloud(){
-  // If hardcoded config is set and valid, use it directly
-  var hc=window.HARDCODED_FB_CFG;
-  if(window.FB_AUTO_CONNECT&&hc&&hc.apiKey&&hc.apiKey!=='YOUR_API_KEY'){
-    saveFbCfgLocal(hc);var ok=initCloud(hc);
-    if(ok)toast('☁️ Connected to Firebase!'); return;
-  }
-  // Otherwise read from Settings form inputs (original behavior):
   var fbCfg={apiKey:document.getElementById('fb-apiKey').value.trim(),authDomain:document.getElementById('fb-authDomain').value.trim(),projectId:document.getElementById('fb-projectId').value.trim(),storageBucket:document.getElementById('fb-storageBucket').value.trim(),messagingSenderId:document.getElementById('fb-messagingSenderId').value.trim(),appId:document.getElementById('fb-appId').value.trim()};
   if(!fbCfg.apiKey||!fbCfg.projectId){toast('\u26a0 Enter API Key and Project ID');return;}
   saveFbCfgLocal(fbCfg);var ok=initCloud(fbCfg);
@@ -1850,22 +1880,10 @@ function toast(msg){var t=document.createElement('div');t.className='toast';t.te
   loadSt();cfg=Object.assign({},DEFAULT_CFG,cfg);
   if(!cfg.flatNames)cfg.flatNames={};if(!cfg.flatDetails)cfg.flatDetails={};
   applyFlatNames();fixOldData();refreshLoginDropdown();ensureMonth(TODAY_YM);setSyncBadge('off');
-  // Auto-connect: DOMContentLoaded handler above handles hardcoded config.
-  // This fallback handles any previously saved config from Settings UI.
-  (function tryFallbackConnect(){
-    var hc = window.HARDCODED_FB_CFG;
-    var hardcoded = window.FB_AUTO_CONNECT
-                 && hc && hc.apiKey
-                 && hc.apiKey !== 'YOUR_API_KEY'
-                 && hc.projectId !== 'YOUR_PROJECT_ID';
-    if (!hardcoded) {
-      // Use config saved via Settings UI (if any)
-      var saved = getSavedFbCfg();
-      if (saved && saved.apiKey) {
-        setTimeout(function(){ initCloud(saved); }, 600);
-      }
-    }
-  })();
+  // Auto-connect handled by DOMContentLoaded in config block above.
+  // Fallback: use any config previously saved via Settings UI.
+  var _savedCfg=getSavedFbCfg();
+  if(_savedCfg&&_savedCfg.apiKey&&!cloudEnabled){setTimeout(function(){initCloudRTDB(_savedCfg);},700);}
 })();
 
 </script>
